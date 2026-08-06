@@ -13,6 +13,7 @@ __all__ = [
     "use_talk_style",
     "wavefield_movie",
     "plot_radargram",
+    "radargram_reference",
     "plot_model",
     "spreading_gain",
     "crop_snapshots",
@@ -336,10 +337,14 @@ def wavefield_movie(
             # referenced to the transmit pulse, which is the natural 0 dB.
             from scipy.signal import hilbert as _hilb
 
+            # One reference for every series, not one per series: the panel
+            # exists to compare them, and normalising each to its own peak is
+            # exactly the rescaling ``share_scale`` warns about.
+            envs = [np.abs(_hilb(np.asarray(a, dtype=float))) * gain
+                    for a, _, _ in trace["series"]]
+            ref = trace.get("ref") or max(float(np.max(e)) for e in envs) or 1.0
             prepared = []
-            for a, lbl, col in trace["series"]:
-                env = np.abs(_hilb(np.asarray(a, dtype=float))) * gain
-                ref = trace.get("ref") or float(np.max(env)) or 1.0
+            for env, (_, lbl, col) in zip(envs, trace["series"]):
                 with np.errstate(divide="ignore"):
                     prepared.append((20.0 * np.log10(np.maximum(env / ref, 1e-12)), lbl, col))
             floor = trace.get("xlim", (-100.0, 5.0))[0]
@@ -485,6 +490,25 @@ def plot_model(ax, field, x, z, *, cmap="viridis", label="", **kw):
     return im
 
 
+def radargram_reference(datasets, t, *, gain_power=0.0):
+    """Shared 0 dB reference for several :func:`plot_radargram` panels.
+
+    The gain has to be applied before the reference is taken.  Measuring it on
+    ungained data and then asking ``plot_radargram`` to gain the display puts
+    every sample tens of dB off the reference -- with ``gain_power = 1`` and a
+    2 us record that is +114 dB, so the whole section clips to the top of the
+    colour scale.  Going through one function keeps the two in step.
+    """
+    from scipy.signal import hilbert
+
+    t = np.asarray(t, dtype=float)
+    gain = spreading_gain(t, power=gain_power)[:, None] if gain_power else 1.0
+    return max(
+        float(np.max(np.abs(hilbert(np.asarray(d, dtype=float) * gain, axis=0))))
+        for d in datasets
+    )
+
+
 def plot_radargram(
     ax,
     data,
@@ -505,9 +529,16 @@ def plot_radargram(
     shown in dB below its peak, which is how the Open Polar Radar products in
     the SCAR figures are displayed.
 
-    Pass ``ref`` to fix the 0 dB reference across several panels.  Without it
+    Pass ``ref`` to fix the 0 dB reference across several panels -- build it
+    with :func:`radargram_reference` so it carries the same gain.  Without it
     each panel is scaled to its own maximum, which hides exactly the amplitude
     difference a polarisation comparison is meant to show.
+
+    ``depth_axis`` gives the depth of every time sample.  Converted through a
+    real slowness profile it is not evenly spaced, so the rows are resampled
+    onto an even depth grid before display; ``imshow`` can only stretch an
+    image linearly between the extent limits, and feeding it a curved axis
+    would misplace everything between the two ends.
 
     Returns the image and the reference level actually used.
     """
@@ -529,7 +560,16 @@ def plot_radargram(
         vmin, vmax = -lim, lim
         label = "amplitude"
 
-    yaxis = t * 1e6 if depth_axis is None else depth_axis
+    if depth_axis is None:
+        yaxis = np.asarray(t, dtype=float) * 1e6
+    else:
+        yaxis = np.asarray(depth_axis, dtype=float)
+        even = np.linspace(yaxis[0], yaxis[-1], yaxis.size)
+        span = abs(yaxis[-1] - yaxis[0]) or 1.0
+        if np.max(np.abs(yaxis - even)) > 1e-6 * span:
+            img = np.column_stack([np.interp(even, yaxis, col) for col in img.T])
+            yaxis = even
+
     im = ax.imshow(
         img,
         extent=(positions[0], positions[-1], yaxis[-1], yaxis[0]),

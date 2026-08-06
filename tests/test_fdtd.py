@@ -11,23 +11,13 @@ from radarwave import (
     PropertyGrid,
     blackharrispulse,
     max_time_step,
+    run_common_offset,
 )
+from radarwave.polarimetry import subsample_lag
 
 EPS_ICE = 3.17
 V_ICE = C0 / np.sqrt(EPS_ICE)
 FC = 100e6
-
-
-def subsample_lag(a, b, dt):
-    """Lag of ``b`` relative to ``a`` from the cross-correlation peak."""
-    a = np.asarray(a) - np.mean(a)
-    b = np.asarray(b) - np.mean(b)
-    n = 1 << int(np.ceil(np.log2(len(a) * 2)))
-    cc = np.fft.irfft(np.fft.rfft(b, n) * np.conj(np.fft.rfft(a, n)), n)
-    cc = np.concatenate([cc[-(n // 2) :], cc[: n // 2]])
-    k = int(np.argmax(cc))
-    y0, y1, y2 = cc[k - 1], cc[k], cc[k + 1]
-    return (k + 0.5 * (y0 - y2) / (y0 - 2 * y1 + y2) - n // 2) * dt
 
 
 def homogeneous(dx=0.25, eps=EPS_ICE, xlim=(-30, 30), zlim=(0, 30), npml=10, **kw):
@@ -275,6 +265,45 @@ def test_gather_and_time_indexing():
     # up to the small asymmetry of the absorbing boundary around that point.
     a, b = res.gather[:, 0, 0], res.gather[:, 0, 1]
     assert np.max(np.abs(a - b)) / np.max(np.abs(b)) < 0.02
+
+
+def test_common_offset_returns_one_trace_per_shot():
+    """Shot ``k`` is paired with receiver ``k``, serially and in parallel.
+
+    The section is what every example plots, and a gather that quietly hands
+    back receiver 0 for every shot is a common-*receiver* record instead: the
+    same picture, with offsets growing to the length of the profile.
+    """
+    grid, dt = homogeneous(xlim=(-14, 14), zlim=(0, 10))
+    t = np.arange(0, 200e-9, dt)
+    pulse = blackharrispulse(FC, t)
+    xs = np.array([-6.0, 0.0, 6.0])
+    shots = np.column_stack([xs, np.full_like(xs, 2.0)])
+    recs = np.column_stack([xs + 1.0, np.full_like(xs, 2.0)])
+
+    co = run_common_offset(grid, dt, shots, recs, pulse, npml=10, mode="TM")
+    assert co.gather.shape == (len(t), 1, len(xs))
+    assert co.common_offset.shape == (len(t), len(xs))
+
+    # Every column has to be that shot's own receiver, not shot 0's.
+    sim = FDTD2D(grid, dt, npml=10, mode="TM")
+    full = sim.run(shots, pulse, recs)
+    for k in range(len(xs)):
+        np.testing.assert_array_equal(co.common_offset[:, k], full.gather[:, k, k])
+
+    par = run_common_offset(grid, dt, shots, recs, pulse, npml=10, mode="TM", processes=2)
+    assert par.gather.shape == co.gather.shape
+    np.testing.assert_allclose(par.common_offset, co.common_offset, rtol=0, atol=0)
+    np.testing.assert_allclose(par.src, co.src)
+    np.testing.assert_allclose(par.rec, co.rec)
+
+
+def test_common_offset_needs_a_receiver_per_shot():
+    grid, dt = homogeneous(xlim=(-14, 14), zlim=(0, 10))
+    t = np.arange(0, 60e-9, dt)
+    shots = np.array([[-6.0, 2.0], [6.0, 2.0]])
+    with pytest.raises(ValueError, match="one receiver per shot"):
+        run_common_offset(grid, dt, shots, shots[:1], blackharrispulse(FC, t))
 
 
 def test_birefringent_delay_converges_with_refinement():

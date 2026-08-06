@@ -30,7 +30,7 @@ Arrays are indexed ``[i, j]`` with ``i`` horizontal and ``j`` vertical
 (downwards).  Transpose before plotting.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 import numpy as np
@@ -73,7 +73,13 @@ class Result:
 
     @property
     def common_offset(self) -> np.ndarray:
-        """Trace ``k`` from shot ``k`` -- the common-offset section."""
+        """Trace ``k`` from shot ``k`` -- the common-offset section ``(n_out, n_src)``.
+
+        A gather that already carries one receiver per shot (what
+        :func:`run_common_offset` returns) is that section already.
+        """
+        if self.gather.shape[1] == 1:
+            return self.gather[:, 0, :]
         n = min(self.gather.shape[1], self.gather.shape[2])
         return np.stack([self.gather[:, k, k] for k in range(n)], axis=1)
 
@@ -645,17 +651,28 @@ def run_common_offset(grid, dt, srcloc, recloc, srcpulse, *, npml=10, mode="TM",
                       outstep=1, processes=None, **kwargs):
     """Run one shot per source position, optionally across several processes.
 
-    Returns a :class:`Result` whose ``gather`` has one column per shot.
+    Returns a :class:`Result` whose ``gather`` has shape ``(n_out, 1, n_src)``:
+    shot ``k`` recorded at receiver ``k`` and nothing else, i.e. the
+    common-offset section, reachable as :attr:`Result.common_offset`.  The
+    layout is the same whether or not the run was parallelised -- a worker
+    process can only record its own shot's receiver, so the serial path is
+    collapsed to match rather than returning every receiver for every shot,
+    which would silently make ``gather[:, 0, :]`` a common-*receiver* section.
     """
     import multiprocessing as mp
 
     srcloc = np.atleast_2d(np.asarray(srcloc, dtype=float))
     recloc = np.atleast_2d(np.asarray(recloc, dtype=float))
     n = srcloc.shape[0]
+    if recloc.shape[0] != n:
+        raise ValueError(
+            f"need one receiver per shot: {n} sources but {recloc.shape[0]} receivers"
+        )
 
     if processes in (None, 1) or n == 1:
         sim = FDTD2D(grid, dt, npml=npml, mode=mode)
-        return sim.run(srcloc, srcpulse, recloc, outstep=outstep, **kwargs)
+        res = sim.run(srcloc, srcpulse, recloc, outstep=outstep, **kwargs)
+        return replace(res, gather=res.common_offset[:, None, :])
 
     ctx = mp.get_context("fork")
     with ctx.Pool(

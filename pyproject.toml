@@ -24,4 +24,9 @@ packages = ["radarwave"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = ["ignore::DeprecationWarning"]
+# Third-party deprecations are noise here, but our own are advance notice that
+# something we call is being removed -- which is how the original code broke.
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "error::DeprecationWarning:radarwave.*",
+]

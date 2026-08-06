@@ -9,6 +9,8 @@ from radarwave.polarimetry import (
     delayed_copy,
     dlambda_from_delay,
     interferogram,
+    isolate_arrival,
+    subsample_lag,
     unwrap_phase,
     volume_scattering,
 )
@@ -38,6 +40,46 @@ def _synthetic(column, n_traces=40, seed=3):
         hh = volume_scattering(t, rng, wavelet, decay_time=14e-6)
         ig[:, j] = interferogram(hh, delayed_copy(t, hh, dtau_t))
     return t, t0, zz, dtau, dtau_t, ig
+
+
+def test_subsample_lag_survives_a_peak_on_an_end_sample():
+    """Parabolic refinement must not index off the end of the correlation."""
+    a = np.zeros(64)
+    a[32] = 1.0
+    assert subsample_lag(a, a, 1.0) == pytest.approx(0.0, abs=1e-9)
+    # A lag of exactly half the correlation length lands the peak on sample 0.
+    b = np.roll(a, 64)
+    assert np.isfinite(subsample_lag(a, b, 1.0))
+
+
+def test_isolate_arrival_recovers_a_delay_buried_in_a_wake():
+    """A common, delay-free background must not drag the measured lag to zero."""
+    dt = 0.5e-9
+    t = np.arange(0, 4e-6, dt)
+    fc, t0, lag = 60e6, 3.0e-6, 20e-9
+
+    def echo(centre):
+        x = t - centre
+        return np.exp(-((x / 25e-9) ** 2)) * np.cos(2 * np.pi * fc * x)
+
+    # Across one window the transmit wake reads as a strong sloping background.
+    # It is identical in both traces, so it carries no delay at all, and being
+    # twenty times the echo it dominates the raw correlation and drags the
+    # answer to zero -- which is how a 40 ns split gets reported as 3 ns.
+    wake = 20.0 * (t - t0) / 1e-6
+    par, perp = wake + echo(t0), wake + echo(t0 + lag)
+
+    idx = np.abs(t - t0) < 0.12e-6
+    raw = subsample_lag(par[idx], perp[idx], dt)
+    _, (a, b) = isolate_arrival(t, [par, perp], t0, 0.12e-6)
+    assert abs(raw - lag) > 5e-9  # the background wins outright
+    assert subsample_lag(a, b, dt) == pytest.approx(lag, rel=0.05)
+
+    # Without the taper the window is still detrended, which is what makes an
+    # amplitude readable off it.
+    _, (c, d) = isolate_arrival(t, [par, perp], t0, 0.12e-6, taper=False)
+    assert np.max(np.abs(c)) == pytest.approx(np.max(np.abs(d)), rel=0.02)
+    assert abs(np.mean(c)) < 1e-9
 
 
 def test_delayed_copy_is_a_pure_delay():

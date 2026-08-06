@@ -142,12 +142,17 @@ def main(quick=False, radargram=False, processes=None):
         (grid.x, l.depth_at(grid.x)) for l in layers if l.depth < zlim[1] - 8.0
     ]
     margin = 0.06 * (xlim[1] - xlim[0])
+    # Crop the wavefield panel at the depth the displayed record reaches, so
+    # its depth axis and the trace panel's time axis read across at the same
+    # place -- and so neither shows the wave arriving at the bottom of the
+    # model, which T_MAX exists to keep out of the picture.
+    z_movie = min(zlim[1] - 0.5 * margin, float(column.depth_from_two_way_time(T_MAX)))
     panels, sx, sz = crop_snapshots(
         [(res.snapshots, "total electric field")],
         res.snapshot_x,
         res.snapshot_z,
         xlim=(xlim[0] + margin, xlim[1] - margin),
-        zlim=(zlim[0], zlim[1] - 0.5 * margin),
+        zlim=(zlim[0], z_movie),
     )
     wavefield_movie(
         OUT / "wavefield.mp4",
@@ -166,7 +171,7 @@ def main(quick=False, radargram=False, processes=None):
             "series": [(res.gather[:, 0, 0], "received", "#b2182b")],
             "db": True,
             "guides": list(column.two_way_time(np.array([l.depth for l in layers]))),
-            "tlim": T_MAX,
+            "tlim": float(column.two_way_time(float(sz[-1]))),
             "xlim": (-125.0, 5.0),
             "title": "received at the transmit antenna",
         },
@@ -270,7 +275,7 @@ def main(quick=False, radargram=False, processes=None):
             model, dt, shots, shots, pulse, npml=NPML, mode="TM", processes=processes
         )
         print(f"  done in {time.time() - t0:.1f} s")
-        data = co.gather[:, 0, :]
+        data = co.common_offset
         _plot_section(data, co.src[:, 0], co.t, column, layers)
         np.savez_compressed(OUT / "radargram.npz", data=data, t=co.t, x=co.src[:, 0])
         print(f"  wrote {OUT / 'radargram.png'}")

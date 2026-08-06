@@ -16,8 +16,88 @@ __all__ = [
     "unwrap_phase",
     "delay_from_phase",
     "dlambda_from_delay",
+    "subsample_lag",
+    "isolate_arrival",
     "synthetic_pair",
 ]
+
+
+def subsample_lag(a, b, dt):
+    """Lag of ``b`` relative to ``a`` (s), from the cross-correlation peak.
+
+    The delays this package measures are a fraction of a sample, so the peak is
+    refined by fitting a parabola through it and its two neighbours.  A peak
+    landing on an end sample has no such neighbours; the integer lag is
+    returned there rather than wrapping around the correlation.
+    """
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    a = a - np.mean(a)
+    b = b - np.mean(b)
+    n = 1 << int(np.ceil(np.log2(max(a.size, 2) * 2)))
+    cc = np.fft.irfft(np.fft.rfft(b, n) * np.conj(np.fft.rfft(a, n)), n)
+    cc = np.concatenate([cc[-(n // 2):], cc[: n // 2]])
+    k = int(np.argmax(cc))
+    lag = float(k - n // 2)
+    if 0 < k < cc.size - 1:
+        denom = cc[k - 1] - 2.0 * cc[k] + cc[k + 1]
+        if denom != 0.0:
+            lag += 0.5 * (cc[k - 1] - cc[k + 1]) / denom
+    return lag * dt
+
+
+def isolate_arrival(t, traces, t0, halfwidth, taper=True):
+    """Window ``traces`` onto a single arrival and strip the background wake.
+
+    A monostatic 2-D line source leaves a slowly decaying wake behind the
+    direct pulse.  A deep layer echo stands only about 10 dB above it, and
+    across a window several cycles wide the wake still carries more energy than
+    the echo -- so cross-correlating raw windows measures the wake, which has
+    travelled nowhere and therefore has no delay, and the answer collapses
+    towards zero.
+
+    The wake varies slowly across a window a few cycles wide, so subtracting a
+    least-squares line through each window removes it.  The Hann taper then
+    weights the centre, where the arrival is, over the edges, where whatever is
+    left of the background is, and keeps the window edges from ringing into the
+    correlation.
+
+    Parameters
+    ----------
+    t : (n,) array
+        Time axis (s).
+    traces : sequence of (n,) arrays
+        Traces sharing that time axis.
+    t0 : float
+        Centre of the window (s).
+    halfwidth : float
+        Half-width of the window (s).
+    taper : bool
+        Apply the Hann taper.  Turn it off to read an amplitude off the window,
+        since the taper weights two traces differently when their peaks sit at
+        different places in it.
+
+    Returns
+    -------
+    idx : ndarray of bool
+        The window that was used.
+    out : list of ndarray
+        The windowed, detrended (and optionally tapered) traces.
+    """
+    t = np.asarray(t, dtype=float)
+    idx = np.abs(t - float(t0)) < float(halfwidth)
+    tw = t[idx]
+    if tw.size < 8:
+        return idx, [np.asarray(tr, dtype=float)[idx] for tr in traces]
+
+    basis = np.vstack([np.ones_like(tw), tw - tw.mean()]).T
+    window = np.hanning(tw.size) if taper else 1.0
+    out = []
+    for tr in traces:
+        w = np.asarray(tr, dtype=float)[idx]
+        coef, *_ = np.linalg.lstsq(basis, w, rcond=None)
+        out.append((w - basis @ coef) * window)
+    return idx, out
 
 
 def analytic(trace, axis=0):

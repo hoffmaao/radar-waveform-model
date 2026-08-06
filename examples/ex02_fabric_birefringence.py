@@ -64,6 +64,8 @@ from radarwave.polarimetry import (
     delayed_copy,
     dlambda_from_delay,
     interferogram,
+    isolate_arrival,
+    subsample_lag,
     unwrap_phase,
     volume_scattering,
 )
@@ -76,18 +78,6 @@ FC_MCORDS = 195e6  # centre frequency of the real Ridge A product
 NPML = 12
 PERP_AZ, PAR_AZ = 89, 179  # horizontal principal axes, degrees east of north
 LAYER_DEPTHS = (60.0, 130.0, 210.0, 300.0, 420.0, 560.0, 700.0)  # acidity horizons
-
-
-def subsample_lag(a, b, dt):
-    """Lag of ``b`` relative to ``a`` from the cross-correlation peak."""
-    a = np.asarray(a) - np.mean(a)
-    b = np.asarray(b) - np.mean(b)
-    n = 1 << int(np.ceil(np.log2(len(a) * 2)))
-    cc = np.fft.irfft(np.fft.rfft(b, n) * np.conj(np.fft.rfft(a, n)), n)
-    cc = np.concatenate([cc[-(n // 2):], cc[: n // 2]])
-    k = int(np.argmax(cc))
-    y0, y1, y2 = cc[k - 1], cc[k], cc[k + 1]
-    return (k + 0.5 * (y0 - y2) / (y0 - 2 * y1 + y2) - n // 2) * dt
 
 
 #: Essentially the strongest horizontal fabric ice can have: every c-axis lying
@@ -144,6 +134,12 @@ def run_fdtd(quick, kind="ridge"):
     t = np.arange(0.0, t_end, dt)
     pulse = blackharrispulse(FC, t)
     fpeak = dominant_frequency(pulse, dt)
+    # The wavelet is not centred on t = 0, so an echo's envelope peaks this
+    # much after its traveltime.  It is ~10 ns, comparable with the delays
+    # being measured, so every predicted arrival below carries it.
+    from scipy.signal import hilbert as _hilb
+
+    t_wave = float(t[int(np.argmax(np.abs(_hilb(pulse))))])
 
     z_src = 3.0
     src = np.array([[0.0, z_src]])
@@ -184,10 +180,10 @@ def run_fdtd(quick, kind="ridge"):
         )
         print(f"  {label} eigenpolarisation finished in {time.time() - t0:.1f} s")
 
-    return column, model, grid, dt, runs, src, rec, xlim, zlim, fpeak, z_src
+    return column, model, grid, dt, runs, src, rec, xlim, zlim, fpeak, z_src, t_wave
 
 
-def received_waveforms(surface, column_of, layer_depths, out_path):
+def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_path):
     """Four monostatic traces: two fabrics x two eigenpolarisations.
 
     Plotted as returned power in dB against two-way time, the way a processed
@@ -203,22 +199,33 @@ def received_waveforms(surface, column_of, layer_depths, out_path):
 
     env = {(k, w): np.abs(hilbert(surface[k][w])) for k, w in order}
     ref = max(float(v.max()) for v in env.values())
+    z_src_of = {k: float(v[2]) for k, v in measured.items()}
+
+    def arrival(col, depth, axis, kind):
+        """When the echo from ``depth`` peaks in the record.
+
+        The antenna is buried a few metres down, so the path is from there and
+        not from the surface -- about 26 ns through firn, which is half the
+        width of the inset below.  ``t_wave`` puts the wavelet's own offset
+        back in so the mark lands on the peak rather than beside it.
+        """
+        return 2.0 * col.traveltime(z_src_of[kind], depth, axis=axis) + t_wave
 
     # Reference arrival of the deepest usable layer, per fabric, for the fast
     # eigenpolarisation.  Drawn in both panels of a pair so the slow one can be
     # seen lagging it.
-    def usable_layers(col, t):
+    def usable_layers(kind, col, t, margin=0.25e-6):
         return [d for d in layer_depths
-                if 2 * col.traveltime(0.0, d, axis=None) < t[-1] - 0.25e-6]
+                if arrival(col, d, None, kind) < t[-1] - margin]
 
     # One common zoom window and one common reference time for all four panels,
     # so peak positions can be compared straight across.  Anchor it on the
     # Ridge A fast axis.
     _ref_col = column_of("ridge")
     _t_ref = surface["ridge"]["t"]
-    _use = usable_layers(_ref_col, _t_ref)
+    _use = usable_layers("ridge", _ref_col, _t_ref)
     zoom_depth = max(_use) if _use else max(layer_depths)
-    t_ref = 2 * _ref_col.traveltime(0.0, zoom_depth, axis=1)
+    t_ref = arrival(_ref_col, zoom_depth, 1, "ridge")
 
     fig, axes = plt.subplots(1, 4, figsize=(17.5, 8.4), sharey=True)
     for ax, (k, w) in zip(axes, order):
@@ -231,8 +238,7 @@ def received_waveforms(surface, column_of, layer_depths, out_path):
         ax.plot(db, t * 1e6, lw=1.0, color=colour)
 
         for d in layer_depths:
-            ax.axhline(2 * col.traveltime(0.0, d, axis=axis) * 1e6,
-                       color="#999", ls=":", lw=0.9)
+            ax.axhline(arrival(col, d, axis, k) * 1e6, color="#999", ls=":", lw=0.9)
         ax.set_xlim(-118, 5)
         ax.set_ylim((t[-1] - 0.25e-6) * 1e6, 0)
         ax.set_xlabel("returned power\n(dB re. transmit pulse)")
@@ -255,28 +261,39 @@ def received_waveforms(surface, column_of, layer_depths, out_path):
 
     # Quantify both effects on the deepest layer: how much later the slow
     # polarisation arrives, and whether its amplitude differs at all.
+    #
+    # The delay is read off the reflection itself, but only after the window is
+    # detrended and tapered.  These echoes stand ~10 dB above the wake the
+    # transmit pulse leaves behind, which over a window several cycles wide is
+    # still the larger share of the energy -- and the wake has travelled
+    # nowhere, so correlating the raw window returns a delay near zero.
+    #
+    # The amplitude cannot be read there: 10 dB of headroom leaves a couple of
+    # dB of scatter, far above the effect being tested.  It comes instead from
+    # the downgoing pulse at the deepest nadir receiver, which is clean enough
+    # to resolve a tenth of a dB.
     notes = []
     for k in ("ridge", "strong"):
         col = column_of(k)
         t = surface[k]["t"]
-        # Deepest layer whose return actually lands inside the record.
-        usable = [d for d in layer_depths
-                  if 2 * col.traveltime(0.0, d, axis=None) < t[-1] - 0.15e-6]
+        rec_z, _lag, zs, amp_db = measured[k]
+        usable = usable_layers(k, col, t, margin=0.15e-6)
         if not usable:
             continue
         deepest = max(usable)
-        t0 = 2 * col.traveltime(0.0, deepest, axis=None)
-        win = np.abs(t - t0) < 0.12e-6
-        if win.sum() < 16:
+        t0 = arrival(col, deepest, None, k)
+        idx, (a_par, a_perp) = isolate_arrival(
+            t, [surface[k]["par"], surface[k]["perp"]], t0, 0.12e-6
+        )
+        if idx.sum() < 16:
             continue
-        shift = subsample_lag(surface[k]["par"][win], surface[k]["perp"][win],
-                              t[1] - t[0])
-        a_par = float(env[(k, "par")][win].max())
-        a_perp = float(env[(k, "perp")][win].max())
+        shift = subsample_lag(a_par, a_perp, t[1] - t[0])
+        model = float(col.birefringent_delay(deepest) - col.birefringent_delay(zs))
         notes.append(
             f"{titles[k]}: the {PERP_AZ} deg return from {deepest:.0f} m arrives "
-            f"{shift * 1e9:.2f} ns later than {PAR_AZ} deg, and is "
-            f"{20 * np.log10(a_perp / a_par):+.2f} dB different in amplitude."
+            f"{shift * 1e9:.2f} ns later than {PAR_AZ} deg (traveltime model "
+            f"{model * 1e9:.2f} ns); down at {float(np.asarray(rec_z)[-1]):.0f} m the two "
+            f"are still within {abs(float(np.asarray(amp_db)[-1])):.2f} dB in amplitude."
         )
 
     fig.suptitle(
@@ -303,8 +320,10 @@ def main(quick=False, render_only=False):
     if render_only and cache.exists():
         panels, sx, sz, stimes, extra = load_snapshots(cache)
         fpeak = float(extra["fpeak"])
+        t_wave = float(extra["t_wave"])
         measured = {
-            k: (extra[f"rec_z_{k}"], extra[f"lag_{k}"], float(extra[f"z_src_{k}"]))
+            k: (extra[f"rec_z_{k}"], extra[f"lag_{k}"], float(extra[f"z_src_{k}"]),
+                extra[f"amp_db_{k}"])
             for k in ("ridge", "strong")
         }
         surface = {
@@ -317,11 +336,16 @@ def main(quick=False, render_only=False):
         panels = None
         for kind in ("ridge", "strong"):
             (col, model, grid, dt, runs, src, rec, xlim, zlim, fpeak,
-             z_src) = run_fdtd(quick, kind=kind)
+             z_src, t_wave) = run_fdtd(quick, kind=kind)
 
             # Identical grids and identical source/receiver nodes, so the lag
             # is the birefringent delay with no geometric correction needed.
             perp, par = runs["perp"], runs["par"]
+            from scipy.signal import hilbert as _h
+
+            def _peak(res, k):
+                return float(np.max(np.abs(_h(res.gather[:, k, 0]))))
+
             measured[kind] = (
                 par.rec[1:, 1],
                 np.array([
@@ -329,6 +353,12 @@ def main(quick=False, render_only=False):
                     for k in range(1, rec.shape[0])
                 ]),
                 par.src[0, 1],
+                # Whether the fabric costs the slow polarisation any amplitude
+                # on the way down, measured where the pulse is clean.
+                np.array([
+                    20.0 * np.log10(_peak(perp, k) / _peak(par, k))
+                    for k in range(1, rec.shape[0])
+                ]),
             )
             # Monostatic surface traces, one per eigenpolarisation.
             surface[kind] = {
@@ -352,9 +382,9 @@ def main(quick=False, render_only=False):
                 stimes = par.snapshot_times
 
         save_snapshots(
-            cache, panels, sx, sz, stimes, fpeak=fpeak,
+            cache, panels, sx, sz, stimes, fpeak=fpeak, t_wave=t_wave,
             **{f"{n}_{k}": v for k in ("ridge", "strong")
-               for n, v in zip(("rec_z", "lag", "z_src"), measured[k])},
+               for n, v in zip(("rec_z", "lag", "z_src", "amp_db"), measured[k])},
             **{f"surf_{k}_{w}": surface[k][w] for k in ("ridge", "strong")
                for w in ("t", "perp", "par")},
         )
@@ -389,7 +419,13 @@ def main(quick=False, render_only=False):
                 (surface["strong"]["par"], f"{PAR_AZ} deg (fast)", "#b2182b"),
             ],
             "db": True,
-            "guides": list(make_column("strong").two_way_time(np.array(LAYER_DEPTHS))),
+            # From the antenna, which is buried in the firn, and offset by the
+            # wavelet -- otherwise every guide sits ~16 ns off its own echo.
+            "guides": list(
+                make_column("strong").two_way_time(
+                    np.array(LAYER_DEPTHS), z0=float(measured["strong"][2])
+                ) + t_wave
+            ),
             "tlim": 8.4e-6,
             "xlim": (-125.0, 5.0),
             "title": "what the receiver records",
@@ -470,7 +506,7 @@ def main(quick=False, render_only=False):
     zmax = max(float(np.max(measured[k][0])) for k in measured) * 1.05
     styles = {"ridge": ("#b2182b", "o", "Ridge A fabric"),
               "strong": ("#2166ac", "s", f"strong fabric (dlam = {STRONG_DLAMBDA:g})")}
-    for kind, (rec_z, lag, zs) in measured.items():
+    for kind, (rec_z, lag, zs, _amp) in measured.items():
         col_, mk, lbl = styles[kind]
         c = make_column(kind)
         zf = np.linspace(0, zmax, 300)
@@ -535,6 +571,7 @@ def main(quick=False, render_only=False):
     notes = received_waveforms(
         surface, make_column,
         list(LAYER_DEPTHS),
+        measured, t_wave,
         OUT / "received.png",
     )
     print(f"  wrote {OUT / 'received.png'}")
@@ -543,7 +580,7 @@ def main(quick=False, render_only=False):
 
     n_fringes = (phi_u[-1] - phi_u[0]) / (2 * np.pi)
     print(f"  wrote {OUT / 'birefringence.png'}")
-    for kind, (rec_z, lag, zs) in measured.items():
+    for kind, (rec_z, lag, zs, _amp) in measured.items():
         c = make_column(kind)
         model_ps = 0.5 * (c.birefringent_delay(float(rec_z[-1]))
                           - c.birefringent_delay(zs)) * 1e12

@@ -117,6 +117,34 @@ def test_traveltime_consistency():
     assert delta == pytest.approx(col.birefringent_delay(d), rel=1e-3)
 
 
+def test_depth_from_two_way_time_inverts_two_way_time():
+    """Round trip, and the firn is nowhere near the solid-ice conversion."""
+    col = IceColumn(**RIDGE_A)
+    depth = np.array([5.0, 40.0, 120.0, 300.0, 900.0, 1800.0])
+    twt = col.two_way_time(depth)
+    np.testing.assert_allclose(col.depth_from_two_way_time(twt), depth, rtol=2e-4)
+
+    # Converting at c / sqrt(3.17) instead puts a shallow event more than a
+    # tenth too shallow, which is the whole reason the inverse exists.
+    naive = twt * (C0 / np.sqrt(3.17)) / 2.0
+    assert naive[1] / depth[1] < 0.85
+    assert np.all(naive <= depth * (1 + 1e-9))
+
+
+def test_two_way_time_from_a_buried_antenna():
+    """An antenna a few metres down sees everything that much earlier."""
+    col = IceColumn(**RIDGE_A)
+    depth = np.array([100.0, 700.0])
+    shift = col.two_way_time(depth) - col.two_way_time(depth, z0=3.0)
+    assert shift == pytest.approx(2 * col.traveltime(0.0, 3.0, axis=None), rel=1e-3)
+    assert np.all(shift > 20e-9)
+
+    twt = col.two_way_time(depth, z0=3.0)
+    np.testing.assert_allclose(
+        col.depth_from_two_way_time(twt, z0=3.0), depth, rtol=2e-4
+    )
+
+
 def test_delay_grows_with_depth_and_dlambda():
     col = IceColumn(**RIDGE_A)
     d = col.birefringent_delay(np.array([200.0, 800.0, 1600.0]))

@@ -50,13 +50,16 @@ in as the wave travels, shown as returned power in dB referenced to the transmit
 pulse, with dotted lines at the two-way time of every layer put into the model.
 The peaks land on the lines.
 
-Everything in this example is plotted against two-way time, including the
-section, so the range axis means the same thing in every panel. Layer positions
-are converted to time by integrating the actual slowness profile
+The recorded trace and the section are plotted against two-way time. Layer
+positions are converted to time by integrating the actual slowness profile
 (`IceColumn.two_way_time`); labelling a depth axis with the solid-ice velocity
 would misplace every shallow reflector, because firn is roughly 25 percent
-faster. The records are cropped at 3.25 us, past which the trace is showing the
-wave interacting with the bottom of the model rather than with the ice.
+faster. Wherever a time axis sits beside a depth axis - the movie's trace panel
+beside its wavefield panel - it is scaled through that same profile, so a
+reflector at depth `z` on the left lands at the same height on the right.
+`trace.png` and the section are cropped at 5.9 us, past which the trace is
+showing the wave interacting with the bottom of the model rather than with the
+ice.
 
 ### 2. Fabric birefringence
 
@@ -88,7 +91,7 @@ while the slow panel stops at it. Once the wave leaves the model the view pulls
 back to the whole domain. The third panel is the trace the receiver records,
 both polarisations in dB, filling in as the run proceeds.
 
-Ridge A's own fabric is some sixty times weaker, still measurable but not
+Ridge A's own `dlam` is roughly twenty times smaller, still measurable but not
 something you can watch on a screen, so the movie uses the strong case and the
 numbers below use Ridge A.
 
@@ -97,8 +100,8 @@ The figure carries the quantitative chain for Ridge A:
 1. the inverted `dlam = lam_perp - lam_par` profile (Open Polar Radar frame
    20250108_02_009),
 2. FDTD-measured delay against the traveltime model, for both Ridge A's own
-   fabric and the strong one - the solver tracks the model to within 1.5 percent
-   across a sixtyfold range of fabric strength (719.4 ps measured against
+   fabric and the strong one - the solver tracks the model to within 2 percent
+   across a 31x range of accumulated delay (719.4 ps measured against
    705.1 ps modelled for Ridge A at 760 m; 22073 ps against 21677 ps for the
    strong fabric),
 3. a synthetic interferogram for the full 1850 m column at 195 MHz,
@@ -106,12 +109,24 @@ The figure carries the quantitative chain for Ridge A:
 
 `received.png` carries the four monostatic traces - two fabrics by two
 eigenpolarisations - as returned power in dB on one shared reference, each with
-an inset magnifying the deepest layer return in a common time window. It
-separates the two things the fabric could do to a measurement:
+an inset magnifying the deepest layer return in a common time window. Every
+marked arrival is timed from the antenna, which is 3 m down in the firn, and
+carries the wavelet's own offset, so the marks land on the peaks rather than
+~16 ns off them. It separates the two things the fabric could do to a
+measurement:
 
-* **speed**: the deepest return arrives tens of ns later on the slow axis than
-  the fast one in the strong fabric, and a fraction of a ns later in Ridge A's;
-* **amplitude**: **0.1 dB or less** either way, in both fabrics.
+* **speed**: in the strong fabric the 700 m return arrives about **42 ns** later
+  on the slow axis than the fast one, against 39.7 ns from the traveltime model;
+  in Ridge A's the same return is a couple of ns late.
+* **amplitude**: nothing resolvable. Both eigenpolarisations see the same
+  isotropic reflectors and the same conductivity, and the figure prints the
+  measured difference between them at the deepest nadir receiver.
+
+The delay is read off the reflection only after the window is detrended and
+tapered (`radarwave.polarimetry.isolate_arrival`). These echoes stand about
+10 dB above the wake the transmit pulse leaves behind, so over a window several
+cycles wide the wake still holds most of the energy - and it has travelled
+nowhere, so correlating the raw window reports a 42 ns split as 3 ns.
 
 So birefringence is a traveltime effect, not an amplitude one, as long as the
 reflectors themselves are isotropic (these are acidity layers, which both
@@ -140,6 +155,14 @@ than the interface is. Here the return comes from 82 m to the side, at 117 m
 depth, and images at 143 m rather than 175 m. Across a profile the feature
 images with `tan(dip_apparent) = sin(dip_true)`: 30 degrees for a 35 degree
 interface.
+
+The section's depth axis is two-way time inverted through the actual slowness
+profile (`IceColumn.depth_from_two_way_time`), not divided by a single
+solid-ice velocity - which is 25 percent too slow through firn and would put
+the imaged event ~15 percent shallow while the predicted-position overlay is
+drawn in true metres. The rows are resampled onto an even depth grid before
+display, since that conversion is not linear and `imshow` can only stretch an
+image linearly between its extent limits.
 
 **It is a polarisation-dependent reflector.** A fabric contrast is a contrast in
 the permittivity *tensor*, so the two eigenpolarisations see different jumps.
@@ -224,9 +247,13 @@ checking the pipeline, not for numbers.
 
 ## Changes from the original code
 
-The Python in this repository previously did not run: `simulation.py` called a
-function that does not exist (`blackharriswave`), and `model.py` imported
-`scipy.interpolate.interp2d`, removed in SciPy 1.14. Beyond fixing that:
+The Python in this repository previously did not run: `model.py` imported
+`scipy.interpolate.interp2d`, removed in SciPy 1.14, and `simulation.py` called
+a function that does not exist (`blackharriswave`, at three of its four call
+sites) on a `crosshole_model.mat` that is not in the repository. `model.py` is
+now a shim over the package. `simulation.py` is untouched and still broken; it
+is superseded by `examples/`, which is what these three simulations are driven
+from. Beyond that:
 
 * **The absorbing boundary was reflecting at -23.5 dB** and, tellingly, did not
   improve when the layer was made thicker. The cause was `kappa_max = 5` real

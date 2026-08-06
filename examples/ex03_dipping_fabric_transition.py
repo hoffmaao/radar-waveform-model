@@ -60,7 +60,13 @@ from radarwave import (
     run_common_offset,
 )
 from radarwave.scenes import IceModelBuilder, conformal_layering, dipping_depth
-from radarwave.viz import crop_snapshots, plot_radargram, use_talk_style, wavefield_movie
+from radarwave.viz import (
+    crop_snapshots,
+    plot_radargram,
+    radargram_reference,
+    use_talk_style,
+    wavefield_movie,
+)
 
 OUT = Path(__file__).resolve().parent.parent / "figures" / "ex03"
 FC = 60e6
@@ -268,9 +274,13 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
         ],
         trace={
             "t": t_rec,
-            "series": [(rec_par, "E along 179 deg", "#b2182b")],
+            "series": [(rec_par, f"E along {bright}", "#b2182b")],
             "db": True,
             "markers": [(t_pred_movie, "fabric transition")],
+            # Run the trace's time axis out to the two-way time of the deepest
+            # depth on the wavefield panel, so the two panels read across at the
+            # same physical depth instead of on unrelated scales.
+            "tlim": float(column.two_way_time(float(sz[-1]))),
             "xlim": (-125.0, 5.0),
             "title": "what the receiver records",
         },
@@ -401,30 +411,33 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
                       f"{len(xs_shot)} shots")
                 co = run_common_offset(mm, dt, shots, shots, pulse, npml=NPML,
                                        mode="TM", processes=processes)
-                traces.append(co.gather[:, 0, :])
+                traces.append(co.common_offset)
                 t_out = co.t
             secs[label] = traces[0] - traces[1]
         np.savez_compressed(OUT / "sections.npz", t=t_out, x=xs_shot,
                             **{k.replace(" ", "_"): v for k, v in secs.items()})
 
-        v = C0 / np.sqrt(3.17)
-        depth_axis = t_out * v / 2.0
+        # Two-way time to depth through the actual slowness profile.  A single
+        # solid-ice velocity is about 25 percent too slow through the firn
+        # column, which would image the event ~15 percent shallow while the
+        # predicted-position overlay below is drawn in true metres.
+        gain_power = 1.0
+        depth_axis = column.depth_from_two_way_time(t_out)
         # One reference for both panels, so the polarisation contrast in the
         # section is the real amplitude difference and not a scaling artefact.
-        from scipy.signal import hilbert as _h
-
-        ref = max(float(np.max(np.abs(_h(d * t_out[:, None], axis=0))))
-                  for d in secs.values())
+        ref = radargram_reference(secs.values(), t_out, gain_power=gain_power)
         fig, axes = plt.subplots(1, 2, figsize=(15, 6.6), sharey=True)
         for ax, (label, data) in zip(axes, secs.items()):
             plot_radargram(ax, data, xs_shot, t_out, db=True, dyn_range=40,
-                           gain_power=1.0, depth_axis=depth_axis, ref=ref,
+                           gain_power=gain_power, depth_axis=depth_axis, ref=ref,
                            title=f"scattered section, E along {label}")
             ax.plot(xline, boundary(xline), "k--", lw=1.2, label="true interface")
             ax.plot(xs_shot, (DEPTH_AT_X0 + np.tan(np.deg2rad(DIP_DEG)) * xs_shot)
                     * np.cos(np.deg2rad(DIP_DEG)), color="#d62728", lw=2,
                     label="predicted image position")
-            ax.set_ylim(0.85 * zlim[1], 0)
+            # Do not open the axis below the depth the record actually reaches;
+            # the extra would be blank paper the section says nothing about.
+            ax.set_ylim(min(0.85 * zlim[1], float(depth_axis[-1])), 0)
             ax.legend(fontsize=10, loc="lower left")
         fig.suptitle(
             "The event images shallower and gentler than the interface really is  "

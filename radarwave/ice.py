@@ -29,6 +29,10 @@ import numpy as np
 
 from .constants import C0, DEPS_ICE, EPS_AIR, EPS_ICE_MEAN
 
+#: ``np.trapz`` is deprecated in NumPy 2 and slated for removal; the successor
+#: is spelled ``np.trapezoid`` and does not exist before 2.0.
+_trapezoid = getattr(np, "trapezoid", None) or np.trapz
+
 __all__ = [
     "IceColumn",
     "herron_langway_density",
@@ -230,23 +234,47 @@ class IceColumn:
             slow = 0.5 * (np.sqrt(eps[:, 0]) + np.sqrt(eps[:, 1])) / C0
         else:
             slow = np.sqrt(eps[:, axis]) / C0
-        return float(np.trapz(slow, zz))
+        return float(_trapezoid(slow, zz))
 
-    def two_way_time(self, depth, n=4001):
-        """Two-way traveltime (s) down to each depth (m).
-
-        Integrates the actual slowness profile, so firn is handled properly.
-        Vectorised over ``depth``.
-        """
-        depth = np.asarray(depth, dtype=float)
-        zmax = float(np.max(depth)) if depth.size else 1.0
-        zz = np.linspace(0.0, max(zmax, 1e-6), n)
+    def _two_way_profile(self, zmax, n=4001):
+        """``(zz, tt)``: two-way time from the surface to each depth in ``zz``."""
+        zz = np.linspace(0.0, max(float(zmax), 1e-6), n)
         eps = self.permittivity(zz)
         slow = 0.5 * (np.sqrt(eps[:, 0]) + np.sqrt(eps[:, 1])) / C0
         tt = 2.0 * np.concatenate(
             [[0.0], np.cumsum(np.diff(zz) * 0.5 * (slow[:-1] + slow[1:]))]
         )
-        return np.interp(depth, zz, tt)
+        return zz, tt
+
+    def two_way_time(self, depth, z0=0.0, n=4001):
+        """Two-way traveltime (s) from ``z0`` down to each depth (m).
+
+        Integrates the actual slowness profile, so firn is handled properly.
+        ``z0`` is the depth of the antenna: a sounder buried a few metres into
+        the firn sees every return that much earlier, which is tens of ns and
+        well inside the width of a reflection.  Vectorised over ``depth``.
+        """
+        depth = np.asarray(depth, dtype=float)
+        zmax = max(float(np.max(depth)) if depth.size else 1.0, float(z0))
+        zz, tt = self._two_way_profile(zmax, n=n)
+        return np.interp(depth, zz, tt) - np.interp(float(z0), zz, tt)
+
+    def depth_from_two_way_time(self, twt, z0=0.0, n=4001):
+        """Depth (m) an echo at two-way time ``twt`` (s) came from.
+
+        The inverse of :meth:`two_way_time`, and the only correct way to put a
+        depth axis on a recorded section: firn is roughly 25 percent faster
+        than solid ice, so converting at a single solid-ice velocity puts every
+        event that travelled through it too shallow.
+        """
+        twt = np.asarray(twt, dtype=float)
+        zz, tt = self._two_way_profile(self.thickness, n=n)
+        tt = tt - np.interp(float(z0), zz, tt)
+        depth = np.interp(twt, tt, zz)
+        # Past the bottom of the column, continue at the bed velocity rather
+        # than flattening the axis onto the last sample.
+        v_bed = (zz[-1] - zz[-2]) / (tt[-1] - tt[-2])
+        return np.where(twt > tt[-1], zz[-1] + (twt - tt[-1]) * v_bed, depth)
 
     def birefringent_delay(self, depth, n=4001):
         """Two-way traveltime difference ``t_x - t_y`` (s) down to ``depth``.
@@ -260,7 +288,7 @@ class IceColumn:
             zz = np.linspace(0.0, d, n)
             eps = self.permittivity(zz)
             slow = np.sqrt(eps[:, :2]) / C0
-            out[k] = 2.0 * np.trapz(slow[:, 0] - slow[:, 1], zz)
+            out[k] = 2.0 * _trapezoid(slow[:, 0] - slow[:, 1], zz)
         return out if out.size > 1 else float(out[0])
 
 
