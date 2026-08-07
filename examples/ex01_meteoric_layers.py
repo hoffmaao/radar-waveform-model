@@ -24,10 +24,14 @@ Run with ``--quick`` for a small, fast version while iterating.
 """
 
 import argparse
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _common import echo_time
 
 from radarwave import (
     C0,
@@ -59,18 +63,6 @@ Z_ANT = -1.0  # antenna 1 m above the snow surface
 T_MAX = 5.9e-6
 
 
-def layer_arrival(column, depth, z_ant, t_wave):
-    """When the echo from ``depth`` peaks in the record (s).
-
-    Two corrections, both of them tens of ns and both larger than the width of
-    a reflection, so a mark drawn without them sits beside its own echo rather
-    than on it: the path is timed from the antenna, which is a metre up in the
-    air and not at the surface, and ``t_wave`` puts back the offset of the
-    wavelet's own envelope peak from the start of the record.
-    """
-    return column.two_way_time(np.asarray(depth, dtype=float), z0=z_ant) + t_wave
-
-
 def _plot_section(data, positions, t, column, layers, z_ant, t_wave):
     """Draw the common-offset section the way a processed radargram is shown."""
     import matplotlib.pyplot as plt
@@ -94,7 +86,7 @@ def _plot_section(data, positions, t, column, layers, z_ant, t_wave):
     )
     for l in layers:
         ax.plot(positions,
-                layer_arrival(column, l.depth_at(np.asarray(positions)), z_ant, t_wave) * 1e6,
+                echo_time(column, l.depth_at(np.asarray(positions)), z_ant, t_wave) * 1e6,
                 color="#2166ac", lw=0.8, alpha=0.45)
     # Follow the record, clipped to T_MAX.  A fixed limit leaves most of the
     # panel blank whenever the record is shorter than T_MAX.
@@ -141,6 +133,11 @@ def main(quick=False, radargram=False, processes=None):
     )
 
     src = np.array([[0.0, Z_ANT]])
+    # The trace is recorded at one x, and the layers undulate: a layer sits a
+    # couple of metres off its nominal depth under the antenna, which is 20 ns
+    # of two-way time and as much as the wavelet and air-path corrections
+    # together.  Mark the depth that is actually beneath the receiver.
+    layer_depths_below_antenna = [float(l.depth_at(src[0, 0])) for l in layers]
     snap_every = max(1, len(t) // 260)
     t0 = time.time()
     res = sim.run(
@@ -190,10 +187,8 @@ def main(quick=False, radargram=False, processes=None):
             "t": res.t,
             "series": [(res.gather[:, 0, 0], "received", "#b2182b")],
             "db": True,
-            "guides": list(
-                layer_arrival(column, [l.depth for l in layers], Z_ANT, t_wave)
-            ),
-            "tlim": float(layer_arrival(column, float(sz[-1]), Z_ANT, t_wave)),
+            "guides": list(echo_time(column, layer_depths_below_antenna, Z_ANT, t_wave)),
+            "tlim": float(echo_time(column, float(sz[-1]), Z_ANT, t_wave)),
             "xlim": (-125.0, 5.0),
             "title": "received at the transmit antenna",
         },
@@ -265,7 +260,7 @@ def main(quick=False, radargram=False, processes=None):
     axes[1].set_xlabel("envelope (dB re. strongest internal return)")
     axes[1].set_title("envelope, log scale", loc="left")
 
-    layer_times = layer_arrival(column, [l.depth for l in layers], Z_ANT, t_wave) * 1e6
+    layer_times = echo_time(column, layer_depths_below_antenna, Z_ANT, t_wave) * 1e6
     for ax in axes:
         for lt in layer_times:
             ax.axhline(lt, color="#1f77b4", lw=0.7, alpha=0.4)

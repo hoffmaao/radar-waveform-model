@@ -48,7 +48,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import load_snapshots, save_snapshots
+from _common import echo_time, load_snapshots, save_snapshots
 
 from radarwave import (
     C0,
@@ -56,6 +56,7 @@ from radarwave import (
     IceColumn,
     PropertyGrid,
     blackharrispulse,
+    envelope_peak_time,
     max_time_step,
     run_common_offset,
 )
@@ -71,6 +72,7 @@ from radarwave.viz import (
 OUT = Path(__file__).resolve().parent.parent / "figures" / "ex03"
 FC = 60e6
 NPML = 12
+Z_ANT = -1.0  # antenna 1 m above the snow surface
 
 DIP_DEG = 35.0  # dip of the fabric transition
 DEPTH_AT_X0 = 175.0  # depth of the transition directly under the antenna
@@ -171,7 +173,8 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
     dt = 0.9 * max_time_step(model.eps_min, model.mu_min, model.dx, model.dz)
     t = np.arange(0.0, t_end, dt)
     pulse = blackharrispulse(FC, t)
-    src = np.array([[0.0, -1.0]])
+    t_wave = envelope_peak_time(pulse, t)
+    src = np.array([[0.0, Z_ANT]])
 
     slant, px, pz = specular_geometry(0.0)
     eps_a = eigen_permittivity(**ABOVE)
@@ -197,9 +200,9 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
         rec_par, rec_perp = extra["rec_par"], extra["rec_perp"]
     else:
         snap_every = max(1, len(t) // 240)
-        total = {}
         traces = {}
         recorded = {}
+        shown = None
         for axis, label in (("yy", "179 deg"), ("xx", "89 deg")):
             fields = []
             for m in (model, twin):
@@ -208,18 +211,25 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
                 mm = m.with_properties(
                     eps={"xx": m.eps["xx"], "yy": m.eps[axis], "zz": m.eps["zz"]}
                 )
+                # Only the movie consumes a wavefield, and it shows one panel:
+                # the bright polarisation propagating through the real model.
+                # A stack here is ~700 MB, so the other three runs record their
+                # trace and nothing else.
+                snap = (
+                    dict(snapshot_every=snap_every, snapshot_stride=1)
+                    if m is model and label == bright else {}
+                )
                 t0 = time.time()
                 res = FDTD2D(mm, dt, npml=NPML, mode="TM").run(
-                    src, pulse, src, outstep=1, snapshot_every=snap_every,
-                    snapshot_stride=1, progress=max(1, len(t) // 4),
+                    src, pulse, src, outstep=1, progress=max(1, len(t) // 4), **snap,
                 )
                 fields.append(res)
                 print(f"  {label} ({'fabric' if m is model else 'twin'}) "
                       f"in {time.time() - t0:.1f} s")
-            total[label] = fields[0].snapshots
             traces[label] = fields[0].gather[:, 0, 0] - fields[1].gather[:, 0, 0]
             recorded[label] = fields[0].gather[:, 0, 0]
-            last = fields[0]
+            if label == bright:
+                shown = fields[0]
 
         # The movie shows one wavefield panel -- the wave as it actually
         # propagates, in the bright polarisation -- beside the trace the
@@ -234,18 +244,17 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
         # deeper than that would need the trace axis to run past t_end, leaving
         # a large blank strip beside depths no echo can return from.
         margin = 8.0
-        zz_probe = np.linspace(0.0, zlim[1], 512)
         depth_reached = float(
-            np.interp(last.t[-1], column.two_way_time(zz_probe), zz_probe)
+            column.depth_from_two_way_time(shown.t[-1] - t_wave, z0=Z_ANT)
         )
         panels, sx, sz = crop_snapshots(
-            [(total[bright], f"E along {bright}")],
-            last.snapshot_x, last.snapshot_z,
+            [(shown.snapshots, f"E along {bright}")],
+            shown.snapshot_x, shown.snapshot_z,
             xlim=(xlim[0] + margin, xlim[1] - margin),
             zlim=(zlim[0], min(zlim[1] - margin, depth_reached)),
         )
-        stimes = last.snapshot_times
-        t_rec = last.t
+        stimes = shown.snapshot_times
+        t_rec = shown.t
         tr_par, tr_perp = traces[bright], traces[dim]
         rec_par, rec_perp = recorded[bright], recorded[dim]
         save_snapshots(cache, panels, sx, sz, stimes,
@@ -253,8 +262,14 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
                        rec_par=rec_par, rec_perp=rec_perp)
 
     # ---- movie ---------------------------------------------------------
-    # The specular arrival, needed for the marker on the trace panel.
-    t_pred_movie = 2.0 * column.traveltime(0.0, pz, axis=None) / np.cos(np.deg2rad(DIP_DEG))
+    # When the specular return peaks in the record: the two-way path down to
+    # the specular point, timed from the antenna and along the inclined ray
+    # rather than straight down, plus the wavelet's own offset.  Using the
+    # solid-ice velocity instead would be 15 percent too slow -- most of this
+    # path is in firn, where the wave travels much faster -- so the traveltime
+    # is integrated through the actual velocity profile.  Marked on the movie's
+    # trace panel and measured against the recording in the figure below.
+    t_pred = float(echo_time(column, pz, Z_ANT, t_wave, dip_deg=DIP_DEG))
 
     xline = np.linspace(xlim[0], xlim[1], 200)
     layer_lines = [(grid.x, l.depth_at(grid.x)) for l in layers]
@@ -280,7 +295,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
             "t": t_rec,
             "series": [(rec_par, f"E along {bright}", "#b2182b")],
             "db": True,
-            "markers": [(t_pred_movie, "fabric transition")],
+            "markers": [(t_pred, "fabric transition")],
             # The wavefield panel is cropped to the depth the record reaches,
             # so the two panels now end at the same physical depth and the
             # trace axis is simply the record.
@@ -321,12 +336,11 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
     cb.set_label(r"$\epsilon_{xx} - \epsilon_{yy}$")
 
     # Recorded scattered trace: the arrival time is the test of the geometry.
-    # Predict the arrival along the specular ray.  Using the solid-ice velocity
-    # would be 15 percent too slow: most of this path is in firn, where the
-    # wave travels much faster, so the traveltime has to be integrated through
-    # the actual velocity profile.
-    t_pred = 2.0 * column.traveltime(0.0, pz, axis=None) / np.cos(np.deg2rad(DIP_DEG))
-    t_naive = 2.0 * slant / (C0 / np.sqrt(3.17))
+    # The same slant path at a single solid-ice velocity, carrying the air leg
+    # and the wavelet offset so that it is comparable with the same recording.
+    t_naive = 2.0 * slant / (C0 / np.sqrt(3.17)) + float(
+        echo_time(column, 0.0, Z_ANT, t_wave, dip_deg=DIP_DEG)
+    )
     from radarwave.polarimetry import analytic
 
     env_par = np.abs(analytic(tr_par))
@@ -403,7 +417,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
     if radargram:
         step = 6.0
         xs_shot = np.arange(xlim[0] + 25, xlim[1] - 25 + 1e-9, step)
-        shots = np.column_stack([xs_shot, np.full_like(xs_shot, -1.0)])
+        shots = np.column_stack([xs_shot, np.full_like(xs_shot, Z_ANT)])
         secs = {}
         for axis, label in (("yy", "179 deg"), ("xx", "89 deg")):
             traces = []
@@ -421,12 +435,14 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
         np.savez_compressed(OUT / "sections.npz", t=t_out, x=xs_shot,
                             **{k.replace(" ", "_"): v for k, v in secs.items()})
 
-        # Two-way time to depth through the actual slowness profile.  A single
-        # solid-ice velocity is about 25 percent too slow through the firn
-        # column, which would image the event ~15 percent shallow while the
-        # predicted-position overlay below is drawn in true metres.
+        # Two-way time to depth through the actual slowness profile, from the
+        # antenna and less the wavelet offset, so a return drawn at its own
+        # depth lands there.  A single solid-ice velocity is about 25 percent
+        # too slow through the firn column, which would image the event ~15
+        # percent shallow while the predicted-position overlay below is drawn
+        # in true metres.
         gain_power = 1.0
-        depth_axis = column.depth_from_two_way_time(t_out)
+        depth_axis = column.depth_from_two_way_time(t_out - t_wave, z0=Z_ANT)
         # One reference for both panels, so the polarisation contrast in the
         # section is the real amplitude difference and not a scaling artefact.
         ref = radargram_reference(secs.values(), t_out, gain_power=gain_power)
