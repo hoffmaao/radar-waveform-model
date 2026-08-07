@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "radarwave"
+version = "0.2.0"
+description = "2-D FDTD modelling of radar waves in polar ice, including fabric anisotropy"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+dependencies = [
+    "numpy>=1.22",
+    "scipy>=1.9",
+    "matplotlib>=3.6",
+]
+
+[project.optional-dependencies]
+movies = ["imageio>=2.28", "imageio-ffmpeg>=0.4.8"]
+dev = ["pytest>=7", "imageio>=2.28", "imageio-ffmpeg>=0.4.8"]
+
+[tool.setuptools]
+packages = ["radarwave"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Third-party deprecations are noise here, but our own are advance notice that
+# something we call is being removed -- which is how the original code broke.
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "error::DeprecationWarning:radarwave.*",
+]
