@@ -151,18 +151,24 @@ def build_models(xlim, zlim, dx):
 def specular_geometry(x_antenna=0.0):
     """Where the return recorded at ``x_antenna`` actually comes from.
 
-    Measured from the antenna, not from the surface: the ray that
-    :func:`_common.echo_time` times starts at ``Z_ANT`` and runs at the dip
-    angle the whole way, so the perpendicular foot has to be dropped from there
-    too.  Taking it from ``z = 0`` instead leaves the air leg pointing somewhere
-    else and quietly lengthens the path.
+    Returns ``(slant_range, px, pz)``.  ``slant_range`` is the perpendicular
+    distance from the *antenna* to the plane -- the whole ray, its short air leg
+    included, and the range the event images at.  ``(px, pz)`` is the specular
+    point in model coordinates, so ``pz`` is a depth below the surface and the
+    ice portion of the ray is ``pz / cos(delta)`` of that range.
+
+    Everything is measured from the antenna rather than from the surface,
+    because the ray :func:`_common.echo_time` times starts at ``Z_ANT`` and runs
+    at the dip angle the whole way.  Dropping the perpendicular from ``z = 0``
+    instead leaves the air leg pointing somewhere else and quietly lengthens the
+    path.
     """
     d = np.deg2rad(DIP_DEG)
     h = DEPTH_AT_X0 - Z_ANT + np.tan(d) * x_antenna  # interface depth below the antenna
-    slant = h * np.cos(d)  # perpendicular distance = apparent depth
-    px = x_antenna - slant * np.sin(d)
-    pz = Z_ANT + slant * np.cos(d)
-    return slant, px, pz
+    slant_range = h * np.cos(d)
+    px = x_antenna - slant_range * np.sin(d)
+    pz = Z_ANT + slant_range * np.cos(d)
+    return slant_range, px, pz
 
 
 def main(quick=False, render_only=False, radargram=False, processes=None):
@@ -183,7 +189,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
     t_wave = envelope_peak_time(pulse, t)
     src = np.array([[0.0, Z_ANT]])
 
-    slant, px, pz = specular_geometry(0.0)
+    slant_range, px, pz = specular_geometry(0.0)
     eps_a = eigen_permittivity(**ABOVE)
     eps_b = eigen_permittivity(**BELOW)
     r_perp = abs((np.sqrt(eps_a[0]) - np.sqrt(eps_b[0]))
@@ -196,7 +202,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
 
     print(f"transition dips {DIP_DEG:.0f} deg, {DEPTH_AT_X0:.0f} m below the surface")
     print(f"  specular point at x = {px:.1f} m, z = {pz:.1f} m; "
-          f"event images at {slant:.1f} m apparent depth")
+          f"event images at {slant_range:.1f} m range from the antenna")
     print(f"  apparent dip {np.degrees(np.arctan(np.sin(np.deg2rad(DIP_DEG)))):.1f} deg")
     print(f"  normal-incidence reflection: 89 deg pol {20 * np.log10(r_perp):.1f} dB, "
           f"179 deg pol {20 * np.log10(r_par):.1f} dB")
@@ -314,7 +320,8 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
         subtitle=(
             f"Conformable layering cut by a fabric transition dipping {DIP_DEG:.0f} deg, "
             f"{DEPTH_AT_X0:.0f} m below the surface. Its return comes from {abs(px):.0f} m off "
-            f"to the side and arrives as if the reflector were at {slant:.0f} m. A fabric "
+            f"to the side and arrives as if the reflector were {slant_range:.0f} m from the "
+            f"antenna. A fabric "
             "contrast can never exceed about -51 dB, so it sits well below the layering."
         ),
     )
@@ -343,9 +350,13 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
     cb.set_label(r"$\epsilon_{xx} - \epsilon_{yy}$")
 
     # Recorded scattered trace: the arrival time is the test of the geometry.
-    # The same slant path at a single solid-ice velocity, carrying the air leg
-    # and the wavelet offset so that it is comparable with the same recording.
-    t_naive = 2.0 * slant / (C0 / np.sqrt(3.17)) + float(
+    # The same ray at a single solid-ice velocity, for contrast.  Only the ice
+    # portion of it -- ``pz / cos(delta)`` of the slant range -- is what a
+    # velocity assumption applies to; the air leg and the wavelet offset come
+    # from the same place as they do for the firn-corrected prediction, so each
+    # is counted exactly once and both times are comparable with the recording.
+    ice_range = pz / np.cos(np.deg2rad(DIP_DEG))
+    t_naive = 2.0 * ice_range / (C0 / np.sqrt(3.17)) + float(
         echo_time(column, 0.0, Z_ANT, t_wave, dip_deg=DIP_DEG)
     )
     from radarwave.polarimetry import analytic
@@ -377,8 +388,8 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
             label=f"E along {dim}")
     ax.axvline(t_pred * 1e6, color="#111", ls="--", lw=1.2)
     ax.annotate(
-        f"predicted arrival\nslant range {slant:.0f} m\n(interface is {DEPTH_AT_X0:.0f} m"
-        f" below the surface)",
+        f"predicted arrival\nslant range {slant_range:.0f} m from the antenna\n"
+        f"(interface is {DEPTH_AT_X0:.0f} m below the surface)",
         (t_pred * 1e6, 0.85), textcoords="offset points", xytext=(10, 0),
         fontsize=11, va="top",
     )

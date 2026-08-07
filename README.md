@@ -209,11 +209,15 @@ against 1.456 us predicted, 1.2 percent apart, and the polarisation contrast is
 The predicted arrival is timed along the specular ray through the firn-corrected
 velocity profile, from the antenna a metre above the surface, and carries the
 wavelet's envelope-peak offset, so it is the same quantity as the measured
-envelope peak - a single solid-ice velocity would give 1.730 us instead. What is
-left is the straight-ray idealisation: the ray is taken as one straight line
-along the interface normal, and a firn velocity gradient bends it onto a faster
-path, which is part of why the measurement lands on the early side. Only a
-refracted two-point ray trace would close the remaining 17 ns.
+envelope peak - a single solid-ice velocity applied to the ice part of the same
+ray would give 1.716 us instead.
+
+The remaining 17 ns is not accounted for. Two candidates: the prediction is a
+straight-ray idealisation of a path through a velocity gradient, which really
+bends, and the measurement is an envelope peak off a dipping plane whose first
+Fresnel zone is metres across, so the return integrates over a band of it rather
+than a point. Nothing in this repository establishes which of those dominates,
+or even which way the ray-bending term pushes the prediction.
 
 ## Package layout
 
