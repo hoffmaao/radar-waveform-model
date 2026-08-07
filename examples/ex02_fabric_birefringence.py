@@ -29,9 +29,10 @@ Two things are computed:
 A note on resolution: the delay being measured is a fraction of a time step,
 so it is sensitive to numerical dispersion, which differs slightly between the
 two runs because their wave speeds differ.  The error converges as the grid is
-refined -- roughly +20 percent at 5.6 nodes per wavelength, +3.5 percent at 8,
-and under 1 percent at 11, which is what the full-resolution run uses.
-``--quick`` is for checking the pipeline, not for the numbers.
+refined, and the full-resolution run sits at 11 nodes per wavelength, where it
+is under 1 percent; ``--quick`` drops to 5.6 and is for checking the pipeline,
+not for the numbers.  The convergence figures are in the README's "Resolution"
+section.
 
 Outputs land in ``figures/ex02/``.  ``--render-only`` re-renders the movie from
 the cached snapshots without re-running the simulation.
