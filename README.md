@@ -22,7 +22,7 @@ into `figures/`.
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest                       # ~57 tests, a few minutes
+pytest                       # ~72 tests, a few minutes
 ```
 
 ## The three examples
@@ -174,7 +174,7 @@ The transition is a vertical single maximum over a horizontal one,
 `lam = (0.115, 0.085, 0.80)` above and `(0.860, 0.060, 0.08)` below, so
 `dlam` goes 0.03 -> 0.80 while `lam_y` barely moves. The 89 degree
 polarisation therefore sees a strong contrast (**-54 dB**) and the 179 degree
-one almost none (-84 dB): the same interface is bright in one polarisation and
+one almost none (-83 dB): the same interface is bright in one polarisation and
 nearly invisible in the other, by **29 dB**. A density or acidity layer cannot
 do that.
 

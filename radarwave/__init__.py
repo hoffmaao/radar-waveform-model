@@ -52,5 +52,4 @@ __all__ = [
     "ricker",
     "ridge_a_dlambda",
     "run_common_offset",
-    "regrid",
 ]

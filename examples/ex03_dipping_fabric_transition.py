@@ -19,10 +19,10 @@ point of the example:
 
 2. **It is a polarisation-dependent reflector.**  A fabric contrast is a
    contrast in the permittivity *tensor*, so the two eigenpolarisations see
-   different jumps.  Here the fabric changes so that the 179 deg polarisation
-   sees a strong contrast and the 89 deg polarisation sees almost none: the
-   same interface is bright in one polarisation and nearly invisible in the
-   other.  A density or acidity layer cannot do that.
+   different jumps.  Here the fabric changes so that the 89 deg polarisation
+   (``eps_xx``) sees a strong contrast and the 179 deg one (``eps_yy``) sees
+   almost none: the same interface is bright in one polarisation and nearly
+   invisible in the other.  A density or acidity layer cannot do that.
 
 The scene also carries ordinary conformable meteoric layering, so the fabric
 transition appears as a discordant feature cutting across a conformable
