@@ -5,6 +5,7 @@ import pytest
 
 from radarwave import C0, IceColumn, PropertyGrid, RIDGE_A, gabor, ridge_a_dlambda
 from radarwave.polarimetry import (
+    analytic,
     delay_from_phase,
     delayed_copy,
     dlambda_from_delay,
@@ -243,3 +244,59 @@ def test_fabric_transition_is_polarisation_dependent():
     jump_x = abs(model.eps["xx"][10, j_below] - model.eps["xx"][10, j_above])
     jump_y = abs(model.eps["yy"][10, j_below] - model.eps["yy"][10, j_above])
     assert jump_y > 5 * jump_x
+
+
+def test_analytic_does_not_wrap_the_transmit_pulse():
+    """The end of a record must not inherit the transmit pulse.
+
+    ``scipy.signal.hilbert`` convolves circularly and the Hilbert kernel decays
+    only as 1/t, so an impulse at t = 0 bleeds onto the last samples of the
+    record -- about 107 dB of spurious "reflection" on these traces, which is
+    what ``analytic`` zero-pads to avoid.
+    """
+    from scipy.signal import hilbert
+
+    n = 4096
+    t = np.arange(n) * 0.5e-9
+    trace = 0.6 * np.exp(-(((t - 2e-9) / 3e-9) ** 2)) * np.cos(2 * np.pi * 60e6 * (t - 2e-9))
+    trace += 5e-7 * np.exp(-(((t - 5e-7) / 12e-9) ** 2)) * np.cos(2 * np.pi * 60e6 * (t - 5e-7))
+
+    padded = np.abs(analytic(trace))
+    tail_db = 20 * np.log10(padded[-60:].max() / padded.max())
+    assert tail_db < -80, f"end of record sits at {tail_db:.1f} dB"
+
+    # The unpadded transform is what this guards against: on this trace it puts
+    # the record's end within a few dB of the transmit pulse.
+    raw = np.abs(hilbert(trace))
+    raw_tail_db = 20 * np.log10(raw[-60:].max() / raw.max())
+    assert raw_tail_db > -10
+    assert raw_tail_db - tail_db > 60
+
+
+def test_analytic_preserves_the_signal():
+    """Padding must not change what the transform is.
+
+    Checked against the definition rather than against ``hilbert`` itself: the
+    circular wrap contaminates the raw transform across the whole record, not
+    only at its ends, so it is not a valid reference here.
+    """
+    n = 2048
+    t = np.arange(n) * 0.5e-9
+    envelope = np.exp(-(((t - 5e-7) / 1.5e-7) ** 2))
+    trace = envelope * np.cos(2 * np.pi * 60e6 * t)
+
+    z = analytic(trace)
+    assert z.shape == trace.shape
+    # The analytic signal carries the original as its real part.
+    np.testing.assert_allclose(np.real(z), trace, rtol=1e-9, atol=1e-12)
+    # ... and its modulus is the envelope it was built from.
+    inner = slice(200, -200)
+    np.testing.assert_allclose(np.abs(z)[inner], envelope[inner], rtol=0.02, atol=1e-3)
+
+
+def test_analytic_handles_a_2d_stack():
+    rng = np.random.default_rng(3)
+    data = rng.normal(size=(512, 4))
+    z = analytic(data, axis=0)
+    assert z.shape == data.shape
+    np.testing.assert_allclose(np.real(z), data, rtol=1e-9, atol=1e-12)

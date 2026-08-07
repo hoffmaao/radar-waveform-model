@@ -60,6 +60,7 @@ from radarwave import (
 )
 from radarwave.ice import RIDGE_A
 from radarwave.polarimetry import (
+    analytic,
     delay_from_phase,
     delayed_copy,
     dlambda_from_delay,
@@ -191,13 +192,12 @@ def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_p
     comparable in both timing and amplitude.
     """
     import matplotlib.pyplot as plt
-    from scipy.signal import hilbert
 
     order = [("ridge", "perp"), ("ridge", "par"), ("strong", "perp"), ("strong", "par")]
     names = {"perp": f"{PERP_AZ} deg (slow)", "par": f"{PAR_AZ} deg (fast)"}
     titles = {"ridge": "Ridge A fabric", "strong": f"strong fabric (dlam = {STRONG_DLAMBDA:g})"}
 
-    env = {(k, w): np.abs(hilbert(surface[k][w])) for k, w in order}
+    env = {(k, w): np.abs(analytic(surface[k][w])) for k, w in order}
     ref = max(float(v.max()) for v in env.values())
     z_src_of = {k: float(v[2]) for k, v in measured.items()}
 

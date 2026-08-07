@@ -233,12 +233,20 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
         # difference there is the transmitted wave picking up a different phase
         # -- large, but not the reflection.  Blank that out on the scattered
         # panel so it shows only upgoing energy a surface antenna could record.
+        # Crop the wavefield to the depth the record can actually reach, so the
+        # wavefield and trace panels end at the same physical depth.  Showing
+        # deeper than that would need the trace axis to run past t_end, leaving
+        # a large blank strip beside depths no echo can return from.
         margin = 8.0
+        zz_probe = np.linspace(0.0, zlim[1], 512)
+        depth_reached = float(
+            np.interp(last.t[-1], column.two_way_time(zz_probe), zz_probe)
+        )
         panels, sx, sz = crop_snapshots(
             [(total[bright], f"E along {bright}")],
             last.snapshot_x, last.snapshot_z,
             xlim=(xlim[0] + margin, xlim[1] - margin),
-            zlim=(zlim[0], zlim[1] - margin),
+            zlim=(zlim[0], min(zlim[1] - margin, depth_reached)),
         )
         stimes = last.snapshot_times
         t_rec = last.t
@@ -277,10 +285,10 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
             "series": [(rec_par, f"E along {bright}", "#b2182b")],
             "db": True,
             "markers": [(t_pred_movie, "fabric transition")],
-            # Run the trace's time axis out to the two-way time of the deepest
-            # depth on the wavefield panel, so the two panels read across at the
-            # same physical depth instead of on unrelated scales.
-            "tlim": float(column.two_way_time(float(sz[-1]))),
+            # The wavefield panel is cropped to the depth the record reaches,
+            # so the two panels now end at the same physical depth and the
+            # trace axis is simply the record.
+            "tlim": float(t_rec[-1]),
             "xlim": (-125.0, 5.0),
             "title": "what the receiver records",
         },
@@ -323,10 +331,10 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
     # the actual velocity profile.
     t_pred = 2.0 * column.traveltime(0.0, pz, axis=None) / np.cos(np.deg2rad(DIP_DEG))
     t_naive = 2.0 * slant / (C0 / np.sqrt(3.17))
-    from scipy.signal import hilbert
+    from radarwave.polarimetry import analytic
 
-    env_par = np.abs(hilbert(tr_par))
-    env_perp = np.abs(hilbert(tr_perp))
+    env_par = np.abs(analytic(tr_par))
+    env_perp = np.abs(analytic(tr_perp))
     win = np.abs(t_rec - t_pred) < 0.09e-6
     t_meas = t_rec[win][int(np.argmax(env_par[win]))]
     ratio = 20 * np.log10(np.max(env_par[win]) / max(np.max(env_perp[win]), 1e-30))
@@ -336,10 +344,10 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
     predicted_contrast = 20 * np.log10(max(r_perp, r_par) / max(min(r_perp, r_par), 1e-12))
     print(f"  bright polarisation is {bright}; measured contrast {ratio:.1f} dB "
           f"(predicted {predicted_contrast:.1f} dB)")
-    tx_peak = float(np.max(np.abs(hilbert(rec_par))))
+    tx_peak = float(np.max(np.abs(analytic(rec_par))))
     print(f"  fabric return sits {20 * np.log10(np.max(env_par[win]) / tx_peak):.0f} dB "
           f"below the transmit pulse; the layering peaks at "
-          f"{20 * np.log10(np.max(np.abs(hilbert(rec_par))[(t_rec > 0.2e-6) & (t_rec < 1.2e-6)]) / tx_peak):.0f} dB")
+          f"{20 * np.log10(np.max(np.abs(analytic(rec_par))[(t_rec > 0.2e-6) & (t_rec < 1.2e-6)]) / tx_peak):.0f} dB")
 
     ax = axes[1]
     # Normalise on the arrival itself.  The very end of the record carries the

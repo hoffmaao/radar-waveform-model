@@ -60,13 +60,13 @@ T_MAX = 5.9e-6
 def _plot_section(data, positions, t, column, layers):
     """Draw the common-offset section the way a processed radargram is shown."""
     import matplotlib.pyplot as plt
-    from scipy.signal import hilbert
+    from radarwave.polarimetry import analytic
 
     # Reference the display to the strongest internal return, not to the
     # surface reflection, which is 40 dB above everything else and would leave
     # the layering invisible.
     gained = data * np.maximum(t, 1e-12)[:, None] ** 2
-    env = np.abs(hilbert(gained, axis=0))
+    env = np.abs(analytic(gained, axis=0))
     # Same crop as the trace figure: beyond T_MAX the section is imaging the
     # bottom of the model, not the ice.
     below = (t > 1.5e-7) & (t < T_MAX)
@@ -82,7 +82,9 @@ def _plot_section(data, positions, t, column, layers):
         ax.plot(positions,
                 column.two_way_time(l.depth_at(np.asarray(positions))) * 1e6,
                 color="#2166ac", lw=0.8, alpha=0.45)
-    ax.set_ylim(T_MAX * 1e6, 0)
+    # Follow the record, clipped to T_MAX.  A fixed limit leaves most of the
+    # panel blank whenever the record is shorter than T_MAX.
+    ax.set_ylim(min(T_MAX, float(t[-1])) * 1e6, 0)
     ax.annotate("blue: layers put into the model", (0.015, 0.03),
                 xycoords="axes fraction", fontsize=11, color="#2166ac")
     fig.tight_layout()
@@ -215,10 +217,10 @@ def main(quick=False, radargram=False, processes=None):
     plt.close(fig)
 
     # ---- recorded trace ------------------------------------------------
-    from scipy.signal import hilbert
+    from radarwave.polarimetry import analytic
 
     trace = res.gather[:, 0, 0]
-    env = np.abs(hilbert(trace))
+    env = np.abs(analytic(trace))
     twtt = res.t * 1e6
 
     # The monostatic antenna records its own transmitted field, which is 60 dB

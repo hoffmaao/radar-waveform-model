@@ -6,6 +6,7 @@ exactly the same steps as the data.
 """
 
 import numpy as np
+from scipy.fft import next_fast_len
 from scipy.signal import hilbert
 
 from .constants import C0, DEPS_ICE
@@ -101,8 +102,25 @@ def isolate_arrival(t, traces, t0, halfwidth, taper=True):
 
 
 def analytic(trace, axis=0):
-    """Complex analytic signal of a real trace."""
-    return hilbert(np.asarray(trace, dtype=float), axis=axis)
+    """Complex analytic signal of a real trace, free of circular wrap-around.
+
+    ``scipy.signal.hilbert`` transforms via the FFT, so its convolution is
+    *circular*, and the Hilbert kernel decays only as 1/t.  Every trace here
+    opens with the transmit pulse, 60-120 dB above any reflection, so that pulse
+    wraps around and lands on the end of the record: the last sample is one
+    sample from t = 0 once the record is treated as periodic.  On a trace with
+    nothing at all in its final samples the raw envelope reads about -3 dB where
+    the padded one reads -105 dB, a 107 dB artefact that looks exactly like a
+    huge late reflection.
+
+    Zero-padding to twice the length pushes the wrap past the end of the record,
+    and the result is truncated back.  Everything that takes an envelope or a
+    phase should come through here rather than calling ``hilbert`` directly.
+    """
+    trace = np.asarray(trace, dtype=float)
+    n = trace.shape[axis]
+    padded = hilbert(trace, N=next_fast_len(2 * n), axis=axis)
+    return np.take(padded, np.arange(n), axis=axis)
 
 
 def interferogram(hh, vv, axis=0):

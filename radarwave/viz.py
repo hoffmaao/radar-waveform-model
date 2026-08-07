@@ -9,6 +9,8 @@ buffer, which is far faster than re-drawing from scratch.
 from pathlib import Path
 import numpy as np
 
+from .polarimetry import analytic
+
 __all__ = [
     "use_talk_style",
     "wavefield_movie",
@@ -335,12 +337,11 @@ def wavefield_movie(
             # The envelope of the analytic signal is used so the trace reads as
             # a power profile rather than a dense oscillation, and everything is
             # referenced to the transmit pulse, which is the natural 0 dB.
-            from scipy.signal import hilbert as _hilb
 
             # One reference for every series, not one per series: the panel
             # exists to compare them, and normalising each to its own peak is
             # exactly the rescaling ``share_scale`` warns about.
-            envs = [np.abs(_hilb(np.asarray(a, dtype=float))) * gain
+            envs = [np.abs(analytic(np.asarray(a, dtype=float))) * gain
                     for a, _, _ in trace["series"]]
             ref = trace.get("ref") or max(float(np.max(e)) for e in envs) or 1.0
             prepared = []
@@ -499,12 +500,11 @@ def radargram_reference(datasets, t, *, gain_power=0.0):
     2 us record that is +114 dB, so the whole section clips to the top of the
     colour scale.  Going through one function keeps the two in step.
     """
-    from scipy.signal import hilbert
 
     t = np.asarray(t, dtype=float)
     gain = spreading_gain(t, power=gain_power)[:, None] if gain_power else 1.0
     return max(
-        float(np.max(np.abs(hilbert(np.asarray(d, dtype=float) * gain, axis=0))))
+        float(np.max(np.abs(analytic(np.asarray(d, dtype=float) * gain, axis=0))))
         for d in datasets
     )
 
@@ -542,14 +542,13 @@ def plot_radargram(
 
     Returns the image and the reference level actually used.
     """
-    from scipy.signal import hilbert
 
     data = np.asarray(data, dtype=float)
     if gain_power:
         data = data * spreading_gain(t, power=gain_power)[:, None]
 
     if db:
-        env = np.abs(hilbert(data, axis=0))
+        env = np.abs(analytic(data, axis=0))
         ref = float(np.max(env)) if ref is None else float(ref)
         img = to_db(env, floor=-dyn_range, ref=ref)
         vmin, vmax = -dyn_range, 0.0
