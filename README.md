@@ -148,14 +148,15 @@ against the observed interferogram.
 ### 3. Dipping fabric transition
 
 A sharp fabric change across a plane dipping at 35 degrees, 175 m below the
-antenna. Two consequences, and they are the point of the example:
+surface. Two consequences, and they are the point of the example:
 
 **The energy that returns is not from beneath the antenna.** A monostatic
 antenna records a specular return only from where the interface normal points
-back at it. For a plane dipping at `delta` at depth `h`, that place is offset
-sideways and the event is recorded at slant range `h cos(delta)` - shallower
-than the interface is. Here the return comes from 82 m to the side, at 117 m
-depth, and images at 143 m rather than 175 m. Across a profile the feature
+back at it. For a plane dipping at `delta` at depth `h` below the antenna, that
+place is offset sideways and the event is recorded at slant range `h cos(delta)`
+- shallower than the interface is. Here the return comes from 83 m to the side,
+at 117 m depth, and images at a range of 144 m rather than the 176 m of air and
+ice directly beneath the antenna. Across a profile the feature
 images with `tan(dip_apparent) = sin(dip_true)`: 30 degrees for a 35 degree
 interface.
 
@@ -202,16 +203,17 @@ any gradational smoothing, which is a large part of why the deep feature in the
 real radargram is faint enough to carry a question mark.
 
 Both predictions come out of the simulation: the return arrives at 1.439 us
-against 1.461 us predicted, 1.5 percent apart, and the polarisation contrast is
+against 1.456 us predicted, 1.2 percent apart, and the polarisation contrast is
 29.4 dB measured against 29.4 dB predicted.
 
 The predicted arrival is timed along the specular ray through the firn-corrected
 velocity profile, from the antenna a metre above the surface, and carries the
 wavelet's envelope-peak offset, so it is the same quantity as the measured
-envelope peak - a single solid-ice velocity would give 1.721 us instead. What is
-left is the straight-ray idealisation: the ray is taken as a straight line at
-the interface normal, while a firn velocity gradient bends it onto a faster
-path, so the measurement lands on the early side of the prediction.
+envelope peak - a single solid-ice velocity would give 1.730 us instead. What is
+left is the straight-ray idealisation: the ray is taken as one straight line
+along the interface normal, and a firn velocity gradient bends it onto a faster
+path, which is part of why the measurement lands on the early side. Only a
+refracted two-point ray trace would close the remaining 17 ns.
 
 ## Package layout
 

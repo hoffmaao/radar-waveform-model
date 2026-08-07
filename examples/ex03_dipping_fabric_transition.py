@@ -75,7 +75,7 @@ NPML = 12
 Z_ANT = -1.0  # antenna 1 m above the snow surface
 
 DIP_DEG = 35.0  # dip of the fabric transition
-DEPTH_AT_X0 = 175.0  # depth of the transition directly under the antenna
+DEPTH_AT_X0 = 175.0  # depth of the transition below the surface at the antenna
 
 # Fabric either side of the transition: a vertical single maximum over a
 # horizontal one aligned with x.  Chosen so that lam_y barely changes across the
@@ -149,12 +149,19 @@ def build_models(xlim, zlim, dx):
 
 
 def specular_geometry(x_antenna=0.0):
-    """Where the return recorded at ``x_antenna`` actually comes from."""
+    """Where the return recorded at ``x_antenna`` actually comes from.
+
+    Measured from the antenna, not from the surface: the ray that
+    :func:`_common.echo_time` times starts at ``Z_ANT`` and runs at the dip
+    angle the whole way, so the perpendicular foot has to be dropped from there
+    too.  Taking it from ``z = 0`` instead leaves the air leg pointing somewhere
+    else and quietly lengthens the path.
+    """
     d = np.deg2rad(DIP_DEG)
-    h = DEPTH_AT_X0 + np.tan(d) * x_antenna  # interface depth under the antenna
+    h = DEPTH_AT_X0 - Z_ANT + np.tan(d) * x_antenna  # interface depth below the antenna
     slant = h * np.cos(d)  # perpendicular distance = apparent depth
     px = x_antenna - slant * np.sin(d)
-    pz = slant * np.cos(d)
+    pz = Z_ANT + slant * np.cos(d)
     return slant, px, pz
 
 
@@ -187,7 +194,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
     # Whichever eigenpolarisation sees the bigger jump is the one worth showing.
     bright, dim = (("89 deg", "179 deg") if r_perp >= r_par else ("179 deg", "89 deg"))
 
-    print(f"transition dips {DIP_DEG:.0f} deg, {DEPTH_AT_X0:.0f} m below the antenna")
+    print(f"transition dips {DIP_DEG:.0f} deg, {DEPTH_AT_X0:.0f} m below the surface")
     print(f"  specular point at x = {px:.1f} m, z = {pz:.1f} m; "
           f"event images at {slant:.1f} m apparent depth")
     print(f"  apparent dip {np.degrees(np.arctan(np.sin(np.deg2rad(DIP_DEG)))):.1f} deg")
@@ -306,7 +313,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
         title="A dipping fabric transition returns energy from off nadir",
         subtitle=(
             f"Conformable layering cut by a fabric transition dipping {DIP_DEG:.0f} deg, "
-            f"{DEPTH_AT_X0:.0f} m below the antenna. Its return comes from {abs(px):.0f} m off "
+            f"{DEPTH_AT_X0:.0f} m below the surface. Its return comes from {abs(px):.0f} m off "
             f"to the side and arrives as if the reflector were at {slant:.0f} m. A fabric "
             "contrast can never exceed about -51 dB, so it sits well below the layering."
         ),
@@ -371,7 +378,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
     ax.axvline(t_pred * 1e6, color="#111", ls="--", lw=1.2)
     ax.annotate(
         f"predicted arrival\nslant range {slant:.0f} m\n(interface is {DEPTH_AT_X0:.0f} m"
-        f" below)",
+        f" below the surface)",
         (t_pred * 1e6, 0.85), textcoords="offset points", xytext=(10, 0),
         fontsize=11, va="top",
     )
