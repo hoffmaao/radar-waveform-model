@@ -2,7 +2,16 @@
 
 import numpy as np
 
-__all__ = ["blackharrispulse", "ricker", "gaussian_derivative", "dominant_frequency"]
+from .polarimetry import analytic
+
+__all__ = [
+    "blackharrispulse",
+    "ricker",
+    "gaussian_derivative",
+    "gabor",
+    "dominant_frequency",
+    "envelope_peak_time",
+]
 
 
 def blackharrispulse(fr, t):
@@ -99,6 +108,24 @@ def gabor(fc, t, bandwidth=0.2, t0=None):
     p = np.exp(-(x**2) / (2.0 * sigma_t**2)) * np.cos(2.0 * np.pi * fc * x)
     peak = np.max(np.abs(p))
     return p / peak if peak > 0 else p
+
+
+def envelope_peak_time(pulse, t):
+    """Time (s) at which the pulse's envelope peaks.
+
+    None of these wavelets is centred on ``t = 0``, so an echo's envelope peaks
+    this much later than the traveltime of the reflector that produced it.  For
+    the Blackman-Harris pulse at 60 MHz that is about 9.5 ns, which is wider
+    than most of the differences these examples measure, so every predicted
+    arrival time has to carry it or the mark lands beside its own echo.
+    """
+    pulse = np.asarray(pulse, dtype=float)
+    t = np.asarray(t, dtype=float)
+    if pulse.shape != t.shape:
+        raise ValueError(
+            f"pulse and time vector must have the same shape: {pulse.shape} vs {t.shape}"
+        )
+    return float(t[int(np.argmax(np.abs(analytic(pulse))))])
 
 
 def dominant_frequency(pulse, dt):

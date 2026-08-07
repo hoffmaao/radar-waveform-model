@@ -145,6 +145,35 @@ def test_two_way_time_from_a_buried_antenna():
     )
 
 
+def test_two_way_time_from_an_antenna_above_the_surface():
+    """A negative z0 is an antenna in the air, and that leg travels at c."""
+    col = IceColumn(**RIDGE_A)
+    depth = np.array([100.0, 700.0])
+    air = 1.0
+    shift = col.two_way_time(depth, z0=-air) - col.two_way_time(depth)
+    assert shift == pytest.approx(2 * air / C0, rel=1e-6)
+
+    twt = col.two_way_time(depth, z0=-air)
+    np.testing.assert_allclose(
+        col.depth_from_two_way_time(twt, z0=-air), depth, rtol=2e-4
+    )
+
+
+def test_birefringent_delay_return_shape_follows_the_argument():
+    """A one-element array must not come back as a bare float."""
+    col = IceColumn(**RIDGE_A)
+    assert isinstance(col.birefringent_delay(800.0), float)
+
+    one = col.birefringent_delay(np.array([800.0]))
+    assert isinstance(one, np.ndarray) and one.shape == (1,)
+    assert one[0] == pytest.approx(col.birefringent_delay(800.0), rel=1e-6)
+
+    many = col.birefringent_delay(np.array([200.0, 800.0]))
+    assert many.shape == (2,)
+    # The cumulative integral has to agree with integrating each depth alone.
+    assert many[0] == pytest.approx(col.birefringent_delay(200.0), rel=1e-3)
+
+
 def test_delay_grows_with_depth_and_dlambda():
     col = IceColumn(**RIDGE_A)
     d = col.birefringent_delay(np.array([200.0, 800.0, 1600.0]))

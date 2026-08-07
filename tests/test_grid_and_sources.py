@@ -8,6 +8,7 @@ from radarwave import (
     PropertyGrid,
     blackharrispulse,
     dominant_frequency,
+    envelope_peak_time,
     gabor,
     max_spatial_step,
     max_time_step,
@@ -64,6 +65,23 @@ def test_gabor_bandwidth(bandwidth):
     half = spec >= 0.5 * spec.max()
     fwhm = f[half].max() - f[half].min()
     assert fwhm / fc == pytest.approx(bandwidth, rel=0.15)
+
+
+def test_envelope_peak_time_locates_the_wavelet():
+    """Predicted arrival times carry this offset, so it has to be the real one."""
+    dt = 1e-10
+    t = np.arange(0, 200e-9, dt)
+
+    # A Ricker centred on a known time is the calibrated case.
+    assert envelope_peak_time(ricker(100e6, t, t0=60e-9), t) == pytest.approx(60e-9, abs=2 * dt)
+
+    # The Blackman-Harris pulse starts at t = 0 and peaks well inside its own
+    # support, which is exactly the offset the examples have to add.
+    tb = envelope_peak_time(blackharrispulse(60e6, t), t)
+    assert 0.0 < tb < 1.14 / 60e6
+
+    with pytest.raises(ValueError, match="same shape"):
+        envelope_peak_time(blackharrispulse(60e6, t), t[:-1])
 
 
 def test_ricker_is_zero_mean():
@@ -126,6 +144,30 @@ def test_permittivity_below_one_is_rejected():
     bad = g.with_properties(eps=0.5)
     with pytest.raises(ValueError, match="must be >= 1"):
         bad.validate()
+
+
+def test_non_finite_or_negative_properties_are_rejected():
+    """A NaN passes every inequality and would run to completion silently."""
+    g = PropertyGrid.uniform((0, 2), (0, 2), 0.5, eps=3.0, sig=1e-5)
+
+    nan_eps = g.eps["xx"].copy()
+    nan_eps[1, 1] = np.nan
+    with pytest.raises(ValueError, match="must be finite"):
+        g.with_properties(eps={"xx": nan_eps, "yy": g.eps["yy"], "zz": g.eps["zz"]}).validate()
+
+    inf_eps = g.eps["xx"].copy()
+    inf_eps[0, 0] = np.inf
+    with pytest.raises(ValueError, match="must be finite"):
+        g.with_properties(eps={"xx": inf_eps, "yy": g.eps["yy"], "zz": g.eps["zz"]}).validate()
+
+    nan_sig = g.sig["yy"].copy()
+    nan_sig[1, 1] = np.nan
+    with pytest.raises(ValueError, match="must be finite"):
+        g.with_properties(sig={"xx": g.sig["xx"], "yy": nan_sig, "zz": g.sig["zz"]}).validate()
+
+    # A negative conductivity is a gain medium and makes the update blow up.
+    with pytest.raises(ValueError, match="must be non-negative"):
+        g.with_properties(sig=-1e-5).validate()
 
 
 def test_padding_preserves_parity_and_edge_values():

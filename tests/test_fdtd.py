@@ -298,6 +298,38 @@ def test_common_offset_returns_one_trace_per_shot():
     np.testing.assert_allclose(par.rec, co.rec)
 
 
+def test_common_offset_rejects_a_common_receiver_record():
+    """Many shots into one receiver has the same gather shape and is not a section."""
+    grid, dt = homogeneous(xlim=(-14, 14), zlim=(0, 10))
+    t = np.arange(0, 120e-9, dt)
+    shots = np.column_stack([np.array([-6.0, 0.0, 6.0]), np.full(3, 2.0)])
+    one_rec = np.array([[0.0, 2.0]])
+
+    res = FDTD2D(grid, dt, npml=10, mode="TM").run(shots, blackharrispulse(FC, t), one_rec)
+    assert res.gather.shape == (len(t), 1, 3)
+    with pytest.raises(ValueError, match="common-receiver"):
+        res.common_offset
+
+
+def test_common_offset_snapshots_do_not_depend_on_the_process_count():
+    """Snapshots are a first-shot output either way; ``processes`` is speed only."""
+    grid, dt = homogeneous(xlim=(-14, 14), zlim=(0, 10))
+    t = np.arange(0, 120e-9, dt)
+    pulse = blackharrispulse(FC, t)
+    xs = np.array([-6.0, 0.0, 6.0])
+    shots = np.column_stack([xs, np.full_like(xs, 2.0)])
+
+    kw = dict(npml=10, mode="TM", snapshot_every=20, snapshot_stride=2)
+    ser = run_common_offset(grid, dt, shots, shots, pulse, **kw)
+    par = run_common_offset(grid, dt, shots, shots, pulse, processes=2, **kw)
+
+    assert ser.snapshots is not None
+    np.testing.assert_allclose(par.snapshots, ser.snapshots, rtol=0, atol=0)
+    np.testing.assert_allclose(par.snapshot_times, ser.snapshot_times)
+    np.testing.assert_allclose(par.snapshot_x, ser.snapshot_x)
+    np.testing.assert_allclose(par.snapshot_z, ser.snapshot_z)
+
+
 def test_common_offset_needs_a_receiver_per_shot():
     grid, dt = homogeneous(xlim=(-14, 14), zlim=(0, 10))
     t = np.arange(0, 60e-9, dt)

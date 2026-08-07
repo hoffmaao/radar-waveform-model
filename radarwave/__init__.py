@@ -20,6 +20,7 @@ from .ice import IceColumn, RIDGE_A, ridge_a_dlambda
 from .sources import (
     blackharrispulse,
     dominant_frequency,
+    envelope_peak_time,
     gabor,
     gaussian_derivative,
     ricker,
@@ -41,6 +42,7 @@ __all__ = [
     "V_ICE",
     "blackharrispulse",
     "dominant_frequency",
+    "envelope_peak_time",
     "gabor",
     "gaussian_derivative",
     "max_spatial_step",

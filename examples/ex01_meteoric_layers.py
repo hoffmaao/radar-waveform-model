@@ -36,6 +36,7 @@ from radarwave import (
     PropertyGrid,
     blackharrispulse,
     dominant_frequency,
+    envelope_peak_time,
     max_time_step,
     run_common_offset,
 )
@@ -51,13 +52,26 @@ from radarwave.viz import (
 OUT = Path(__file__).resolve().parent.parent / "figures" / "ex01"
 FC = 60e6  # source frequency (Hz); a classic deep-sounding band
 NPML = 12
+Z_ANT = -1.0  # antenna 1 m above the snow surface
 # The record runs long enough for the deepest layer's echo to return.  The last
 # stretch carries the wave interacting with the bottom of the model rather than
 # with the ice, so the display is cropped there.
 T_MAX = 5.9e-6
 
 
-def _plot_section(data, positions, t, column, layers):
+def layer_arrival(column, depth, z_ant, t_wave):
+    """When the echo from ``depth`` peaks in the record (s).
+
+    Two corrections, both of them tens of ns and both larger than the width of
+    a reflection, so a mark drawn without them sits beside its own echo rather
+    than on it: the path is timed from the antenna, which is a metre up in the
+    air and not at the surface, and ``t_wave`` puts back the offset of the
+    wavelet's own envelope peak from the start of the record.
+    """
+    return column.two_way_time(np.asarray(depth, dtype=float), z0=z_ant) + t_wave
+
+
+def _plot_section(data, positions, t, column, layers, z_ant, t_wave):
     """Draw the common-offset section the way a processed radargram is shown."""
     import matplotlib.pyplot as plt
     from radarwave.polarimetry import analytic
@@ -80,7 +94,7 @@ def _plot_section(data, positions, t, column, layers):
     )
     for l in layers:
         ax.plot(positions,
-                column.two_way_time(l.depth_at(np.asarray(positions))) * 1e6,
+                layer_arrival(column, l.depth_at(np.asarray(positions)), z_ant, t_wave) * 1e6,
                 color="#2166ac", lw=0.8, alpha=0.45)
     # Follow the record, clipped to T_MAX.  A fixed limit leaves most of the
     # panel blank whenever the record is shorter than T_MAX.
@@ -116,6 +130,7 @@ def main(quick=False, radargram=False, processes=None):
     t = np.arange(0.0, t_end, dt)
     pulse = blackharrispulse(FC, t)
     fpeak = dominant_frequency(pulse, dt)
+    t_wave = envelope_peak_time(pulse, t)
     lam_ice = C0 / np.sqrt(3.17) / fpeak
 
     sim = FDTD2D(model, dt, npml=NPML, mode="TM")
@@ -125,7 +140,7 @@ def main(quick=False, radargram=False, processes=None):
         f"({lam_ice / dx:.1f} nodes), {len(t)} time steps, {len(layers)} layers"
     )
 
-    src = np.array([[0.0, -1.0]])  # antenna 1 m above the snow surface
+    src = np.array([[0.0, Z_ANT]])
     snap_every = max(1, len(t) // 260)
     t0 = time.time()
     res = sim.run(
@@ -148,7 +163,10 @@ def main(quick=False, radargram=False, processes=None):
     # its depth axis and the trace panel's time axis read across at the same
     # place -- and so neither shows the wave arriving at the bottom of the
     # model, which T_MAX exists to keep out of the picture.
-    z_movie = min(zlim[1] - 0.5 * margin, float(column.depth_from_two_way_time(T_MAX)))
+    z_movie = min(
+        zlim[1] - 0.5 * margin,
+        float(column.depth_from_two_way_time(T_MAX - t_wave, z0=Z_ANT)),
+    )
     panels, sx, sz = crop_snapshots(
         [(res.snapshots, "total electric field")],
         res.snapshot_x,
@@ -172,8 +190,10 @@ def main(quick=False, radargram=False, processes=None):
             "t": res.t,
             "series": [(res.gather[:, 0, 0], "received", "#b2182b")],
             "db": True,
-            "guides": list(column.two_way_time(np.array([l.depth for l in layers]))),
-            "tlim": float(column.two_way_time(float(sz[-1]))),
+            "guides": list(
+                layer_arrival(column, [l.depth for l in layers], Z_ANT, t_wave)
+            ),
+            "tlim": float(layer_arrival(column, float(sz[-1]), Z_ANT, t_wave)),
             "xlim": (-125.0, 5.0),
             "title": "received at the transmit antenna",
         },
@@ -245,7 +265,7 @@ def main(quick=False, radargram=False, processes=None):
     axes[1].set_xlabel("envelope (dB re. strongest internal return)")
     axes[1].set_title("envelope, log scale", loc="left")
 
-    layer_times = column.two_way_time(np.array([l.depth for l in layers])) * 1e6
+    layer_times = layer_arrival(column, [l.depth for l in layers], Z_ANT, t_wave) * 1e6
     for ax in axes:
         for lt in layer_times:
             ax.axhline(lt, color="#1f77b4", lw=0.7, alpha=0.4)
@@ -270,7 +290,7 @@ def main(quick=False, radargram=False, processes=None):
         # part of the example by a wide margin.
         step = 4.0 if quick else 14.0
         xs = np.arange(xlim[0] + 20, xlim[1] - 20 + 1e-9, step)
-        shots = np.column_stack([xs, np.full_like(xs, -1.0)])
+        shots = np.column_stack([xs, np.full_like(xs, Z_ANT)])
         print(f"  running {len(xs)} shots for the common-offset section...")
         t0 = time.time()
         co = run_common_offset(
@@ -278,7 +298,7 @@ def main(quick=False, radargram=False, processes=None):
         )
         print(f"  done in {time.time() - t0:.1f} s")
         data = co.common_offset
-        _plot_section(data, co.src[:, 0], co.t, column, layers)
+        _plot_section(data, co.src[:, 0], co.t, column, layers, Z_ANT, t_wave)
         np.savez_compressed(OUT / "radargram.npz", data=data, t=co.t, x=co.src[:, 0])
         print(f"  wrote {OUT / 'radargram.png'}")
 

@@ -135,10 +135,19 @@ class PropertyGrid:
                 raise ValueError(f"eps['{name}'] has the wrong shape")
             if self.sig[name].shape != (nxp, nzp):
                 raise ValueError(f"sig['{name}'] has the wrong shape")
+            # A NaN from an interpolation or a bad mask passes every inequality
+            # below, and the time loop then propagates it to the whole field
+            # and returns silently, so finiteness is checked first.
+            if not np.all(np.isfinite(self.eps[name])):
+                raise ValueError(f"eps['{name}'] must be finite")
+            if not np.all(np.isfinite(self.sig[name])):
+                raise ValueError(f"sig['{name}'] must be finite")
             # Tolerance because interpolating a field that is exactly 1 (air)
             # lands a few cells on 0.999999999999999.
             if np.any(self.eps[name] < 1.0 - 1e-9):
                 raise ValueError(f"eps['{name}'] must be >= 1 (relative permittivity)")
+            if np.any(self.sig[name] < 0.0):
+                raise ValueError(f"sig['{name}'] must be non-negative")
         if self.mu.shape != (nxp, nzp):
             raise ValueError("mu has the wrong shape")
         if not np.all(np.isfinite(self.mu)) or np.any(self.mu <= 0):

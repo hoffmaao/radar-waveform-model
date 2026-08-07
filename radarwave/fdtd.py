@@ -76,11 +76,23 @@ class Result:
         """Trace ``k`` from shot ``k`` -- the common-offset section ``(n_out, n_src)``.
 
         A gather that already carries one receiver per shot (what
-        :func:`run_common_offset` returns) is that section already.
+        :func:`run_common_offset` returns) is that section already.  Which one
+        it is comes from :attr:`rec`, not from the shape: a run of many shots
+        into a *single* receiver also has one receiver axis entry, and handing
+        that back would silently label a common-receiver record as
+        common-offset, so it is rejected instead.
         """
-        if self.gather.shape[1] == 1:
+        n_rec, n_src = self.gather.shape[1], self.gather.shape[2]
+        if n_rec == 1:
+            n_pos = np.atleast_2d(self.rec).shape[0]
+            if n_pos != n_src:
+                raise ValueError(
+                    f"gather has one receiver axis entry but {n_pos} receiver "
+                    f"position(s) for {n_src} shots: this is a common-receiver "
+                    "record, not a common-offset section"
+                )
             return self.gather[:, 0, :]
-        n = min(self.gather.shape[1], self.gather.shape[2])
+        n = min(n_rec, n_src)
         return np.stack([self.gather[:, k, k] for k in range(n)], axis=1)
 
 
@@ -658,6 +670,11 @@ def run_common_offset(grid, dt, srcloc, recloc, srcpulse, *, npml=10, mode="TM",
     process can only record its own shot's receiver, so the serial path is
     collapsed to match rather than returning every receiver for every shot,
     which would silently make ``gather[:, 0, :]`` a common-*receiver* section.
+
+    Snapshot options are honoured on both paths and, as in :meth:`FDTD2D.run`,
+    store the first shot only: the parallel path hands them to the worker that
+    takes shot 0 and carries its snapshots back, so ``processes`` changes how
+    long the run takes and nothing about what it returns.
     """
     import multiprocessing as mp
 
@@ -680,7 +697,7 @@ def run_common_offset(grid, dt, srcloc, recloc, srcpulse, *, npml=10, mode="TM",
         initializer=_worker_init,
         initargs=(grid, dt, npml, mode, srcpulse, outstep, kwargs),
     ) as pool:
-        out = pool.map(_worker_shot, [(srcloc[k], recloc[k]) for k in range(n)])
+        out = pool.map(_worker_shot, [(k, srcloc[k], recloc[k]) for k in range(n)])
 
     traces = np.stack([o[0] for o in out], axis=-1)  # (n_out, 1, n_src)
     return Result(
@@ -689,6 +706,10 @@ def run_common_offset(grid, dt, srcloc, recloc, srcpulse, *, npml=10, mode="TM",
         src=np.stack([o[2] for o in out]),
         rec=np.stack([o[3] for o in out]),
         component=out[0][4],
+        snapshots=out[0][5],
+        snapshot_times=out[0][6],
+        snapshot_x=out[0][7],
+        snapshot_z=out[0][8],
     )
 
 
@@ -699,17 +720,25 @@ def _worker_init(grid, dt, npml, mode, srcpulse, outstep, kwargs):
     _WORKER["sim"] = FDTD2D(grid, dt, npml=npml, mode=mode)
     _WORKER["pulse"] = srcpulse
     _WORKER["outstep"] = outstep
+    # Snapshots are a first-shot-only output, so only that worker takes them:
+    # every worker storing a wavefield stack would multiply the memory of the
+    # run by the number of processes and then throw all but one away.
     _WORKER["kwargs"] = {k: v for k, v in kwargs.items() if not k.startswith("snapshot")}
+    _WORKER["snapshot_kwargs"] = {k: v for k, v in kwargs.items() if k.startswith("snapshot")}
 
 
 def _worker_shot(args):
-    src, rec = args
+    k, src, rec = args
     sim = _WORKER["sim"]
+    kwargs = dict(_WORKER["kwargs"])
+    if k == 0:
+        kwargs.update(_WORKER["snapshot_kwargs"])
     res = sim.run(
         src[None, :],
         _WORKER["pulse"],
         rec[None, :],
         outstep=_WORKER["outstep"],
-        **_WORKER["kwargs"],
+        **kwargs,
     )
-    return res.gather[:, :, 0], res.t, res.src[0], res.rec[0], res.component
+    return (res.gather[:, :, 0], res.t, res.src[0], res.rec[0], res.component,
+            res.snapshots, res.snapshot_times, res.snapshot_x, res.snapshot_z)

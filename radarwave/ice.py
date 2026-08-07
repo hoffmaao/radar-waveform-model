@@ -33,6 +33,13 @@ from .constants import C0, DEPS_ICE, EPS_AIR, EPS_ICE_MEAN
 #: is spelled ``np.trapezoid`` and does not exist before 2.0.
 _trapezoid = getattr(np, "trapezoid", None) or np.trapz
 
+
+def _cumtrapz(y, x):
+    """Cumulative trapezoidal integral of ``y`` over ``x``, starting at zero."""
+    y = np.asarray(y, dtype=float)
+    x = np.asarray(x, dtype=float)
+    return np.concatenate([[0.0], np.cumsum(np.diff(x) * 0.5 * (y[:-1] + y[1:]))])
+
 __all__ = [
     "IceColumn",
     "herron_langway_density",
@@ -241,10 +248,20 @@ class IceColumn:
         zz = np.linspace(0.0, max(float(zmax), 1e-6), n)
         eps = self.permittivity(zz)
         slow = 0.5 * (np.sqrt(eps[:, 0]) + np.sqrt(eps[:, 1])) / C0
-        tt = 2.0 * np.concatenate(
-            [[0.0], np.cumsum(np.diff(zz) * 0.5 * (slow[:-1] + slow[1:]))]
-        )
-        return zz, tt
+        return zz, 2.0 * _cumtrapz(slow, zz)
+
+    def _antenna_time(self, z0, zz, tt):
+        """Two-way time of an antenna at depth ``z0`` on the profile ``(zz, tt)``.
+
+        A negative ``z0`` is an antenna above the snow surface, so that leg is
+        in air and is timed at ``c``.  Interpolating the ice profile instead
+        would clamp to the surface and silently drop the air path, which is
+        6.7 ns for a metre of it -- comparable with the width of a reflection.
+        """
+        z0 = float(z0)
+        if z0 < 0.0:
+            return 2.0 * z0 / C0
+        return float(np.interp(z0, zz, tt))
 
     def two_way_time(self, depth, z0=0.0, n=4001):
         """Two-way traveltime (s) from ``z0`` down to each depth (m).
@@ -252,12 +269,14 @@ class IceColumn:
         Integrates the actual slowness profile, so firn is handled properly.
         ``z0`` is the depth of the antenna: a sounder buried a few metres into
         the firn sees every return that much earlier, which is tens of ns and
-        well inside the width of a reflection.  Vectorised over ``depth``.
+        well inside the width of a reflection.  A negative ``z0`` is an antenna
+        flown above the surface and adds the two-way air path.  Vectorised over
+        ``depth``.
         """
         depth = np.asarray(depth, dtype=float)
         zmax = max(float(np.max(depth)) if depth.size else 1.0, float(z0))
         zz, tt = self._two_way_profile(zmax, n=n)
-        return np.interp(depth, zz, tt) - np.interp(float(z0), zz, tt)
+        return np.interp(depth, zz, tt) - self._antenna_time(z0, zz, tt)
 
     def depth_from_two_way_time(self, twt, z0=0.0, n=4001):
         """Depth (m) an echo at two-way time ``twt`` (s) came from.
@@ -269,7 +288,7 @@ class IceColumn:
         """
         twt = np.asarray(twt, dtype=float)
         zz, tt = self._two_way_profile(self.thickness, n=n)
-        tt = tt - np.interp(float(z0), zz, tt)
+        tt = tt - self._antenna_time(z0, zz, tt)
         depth = np.interp(twt, tt, zz)
         # Past the bottom of the column, continue at the bed velocity rather
         # than flattening the axis onto the last sample.
@@ -281,15 +300,18 @@ class IceColumn:
 
         Normal incidence; both polarisations follow the same vertical ray,
         which is accurate because solid ice is only ~1 percent birefringent.
+        The delay is one cumulative integral, so it is built once over the
+        deepest requested depth and read off it.  Vectorised over ``depth``;
+        the return has the shape of the argument.
         """
-        depth = np.atleast_1d(np.asarray(depth, dtype=float))
-        out = np.empty_like(depth)
-        for k, d in enumerate(depth):
-            zz = np.linspace(0.0, d, n)
-            eps = self.permittivity(zz)
-            slow = np.sqrt(eps[:, :2]) / C0
-            out[k] = 2.0 * _trapezoid(slow[:, 0] - slow[:, 1], zz)
-        return out if out.size > 1 else float(out[0])
+        depth = np.asarray(depth, dtype=float)
+        zmax = float(np.max(depth)) if depth.size else 1.0
+        zz = np.linspace(0.0, max(zmax, 1e-6), n)
+        eps = self.permittivity(zz)
+        slow = np.sqrt(eps[:, :2]) / C0
+        tt = 2.0 * _cumtrapz(slow[:, 0] - slow[:, 1], zz)
+        out = np.interp(depth, zz, tt)
+        return out if depth.ndim else float(out)
 
 
 #: Ridge A configuration used by the examples.

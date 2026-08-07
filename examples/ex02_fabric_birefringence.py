@@ -54,6 +54,7 @@ from radarwave import (
     PropertyGrid,
     blackharrispulse,
     dominant_frequency,
+    envelope_peak_time,
     gabor,
     max_time_step,
     ridge_a_dlambda,
@@ -138,9 +139,7 @@ def run_fdtd(quick, kind="ridge"):
     # The wavelet is not centred on t = 0, so an echo's envelope peaks this
     # much after its traveltime.  It is ~10 ns, comparable with the delays
     # being measured, so every predicted arrival below carries it.
-    from scipy.signal import hilbert as _hilb
-
-    t_wave = float(t[int(np.argmax(np.abs(_hilb(pulse))))])
+    t_wave = envelope_peak_time(pulse, t)
 
     z_src = 3.0
     src = np.array([[0.0, z_src]])
@@ -341,10 +340,9 @@ def main(quick=False, render_only=False):
             # Identical grids and identical source/receiver nodes, so the lag
             # is the birefringent delay with no geometric correction needed.
             perp, par = runs["perp"], runs["par"]
-            from scipy.signal import hilbert as _h
 
             def _peak(res, k):
-                return float(np.max(np.abs(_h(res.gather[:, k, 0]))))
+                return float(np.max(np.abs(analytic(res.gather[:, k, 0]))))
 
             measured[kind] = (
                 par.rec[1:, 1],

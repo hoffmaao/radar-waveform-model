@@ -197,7 +197,6 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
         rec_par, rec_perp = extra["rec_par"], extra["rec_perp"]
     else:
         snap_every = max(1, len(t) // 240)
-        scattered = {}
         total = {}
         traces = {}
         recorded = {}
@@ -217,22 +216,19 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
                 fields.append(res)
                 print(f"  {label} ({'fabric' if m is model else 'twin'}) "
                       f"in {time.time() - t0:.1f} s")
-            scattered[label] = fields[0].snapshots - fields[1].snapshots
             total[label] = fields[0].snapshots
             traces[label] = fields[0].gather[:, 0, 0] - fields[1].gather[:, 0, 0]
             recorded[label] = fields[0].gather[:, 0, 0]
             last = fields[0]
 
-        # Left panel: the wave as it actually propagates.  Right panel: the
-        # same run minus a transition-free twin, which leaves only the energy
-        # the fabric contrast sent back.  Both are needed -- the reflection is
-        # ~60 dB down, so it simply cannot be seen beside the incident wave,
-        # which is exactly why the real feature is faint in the radargram.
+        # The movie shows one wavefield panel -- the wave as it actually
+        # propagates, in the bright polarisation -- beside the trace the
+        # antenna records.  The transition's own return is ~60 dB down and
+        # cannot be seen beside the incident wave at all, which is exactly why
+        # the real feature is faint in the radargram; it is isolated instead by
+        # subtracting the transition-free twin, and that difference is what the
+        # geometry figure below measures.
         #
-        # Below the interface the two models genuinely differ, so their
-        # difference there is the transmitted wave picking up a different phase
-        # -- large, but not the reflection.  Blank that out on the scattered
-        # panel so it shows only upgoing energy a surface antenna could record.
         # Crop the wavefield to the depth the record can actually reach, so the
         # wavefield and trace panels end at the same physical depth.  Showing
         # deeper than that would need the trace axis to run past t_end, leaving

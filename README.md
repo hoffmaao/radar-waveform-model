@@ -54,7 +54,10 @@ The recorded trace and the section are plotted against two-way time. Layer
 positions are converted to time by integrating the actual slowness profile
 (`IceColumn.two_way_time`); labelling a depth axis with the solid-ice velocity
 would misplace every shallow reflector, because firn is roughly 25 percent
-faster. Wherever a time axis sits beside a depth axis - the movie's trace panel
+faster. Each layer time is measured from the antenna, which is 1 m above the
+surface, and carries the offset of the wavelet's own envelope peak
+(`envelope_peak_time`); without those two corrections every mark would sit
+~16 ns early. Wherever a time axis sits beside a depth axis - the movie's trace panel
 beside its wavefield panel - it is scaled through that same profile, so a
 reflector at depth `z` on the left lands at the same height on the right.
 `trace.png` and the section are cropped at 5.9 us, past which the trace is
