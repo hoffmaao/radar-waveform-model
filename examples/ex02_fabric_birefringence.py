@@ -47,7 +47,13 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import StaleCache, load_snapshots, save_figure, save_snapshots
+from _common import (
+    StaleCache,
+    load_snapshots,
+    save_figure,
+    save_snapshots,
+    stampable,
+)
 
 from radarwave import (
     C0,
@@ -95,18 +101,24 @@ REC_TOP, REC_STEP, REC_MARGIN = 40.0, 20.0, 25.0  # nadir receiver string
 STRONG_DLAMBDA = 0.96
 STRONG_LAM_Z = 0.02
 
+#: The two columns as their constructor arguments, and the acidity reflector as
+#: its own.  Kept as mappings rather than written out at the call site so the
+#: cache stamp is taken from the same values the model is built from, and a
+#: parameter added to either one cannot escape the stamp.
+STRONG_COLUMN = dict(
+    thickness=1850.0,
+    depth_bco=100.0,
+    sigma_ice=1.5e-5,
+    lam_z_sfc=STRONG_LAM_Z,
+    lam_z_bed=STRONG_LAM_Z,
+    dlambda=lambda d: np.full_like(np.asarray(d, float), STRONG_DLAMBDA),
+)
+COLUMNS = {"ridge": RIDGE_A, "strong": STRONG_COLUMN}
+REFLECTOR = dict(thickness=1.0, sigma_factor=3.0, undulations=((2.0, 260.0, 0.7),))
+
 
 def make_column(kind):
-    if kind == "ridge":
-        return IceColumn(**RIDGE_A)
-    return IceColumn(
-        thickness=1850.0,
-        depth_bco=100.0,
-        sigma_ice=1.5e-5,
-        lam_z_sfc=STRONG_LAM_Z,
-        lam_z_bed=STRONG_LAM_Z,
-        dlambda=lambda d: np.full_like(np.asarray(d, float), STRONG_DLAMBDA),
-    )
+    return IceColumn(**COLUMNS[kind])
 
 
 def fdtd_geometry(quick):
@@ -135,7 +147,11 @@ def cache_stamp(quick):
 
     Re-rendering a cache written from a different model would put its measured
     delays and amplitudes beside the traveltime numbers computed here from the
-    current constants, with nothing in the figure to say so.
+    current constants, with nothing in the figure to say so.  Every value that
+    changes the physics has to be in here or the guard gives false confidence:
+    the columns and the reflector come straight from the mappings they are built
+    from, and the two things their ``dlambda`` callables close over -- Ridge A's
+    tabulated profile and ``STRONG_DLAMBDA`` -- are stamped beside them.
     """
     dx, xlim, zlim, t_end = fdtd_geometry(quick)
     return {
@@ -146,13 +162,13 @@ def cache_stamp(quick):
         "fc": FC,
         "npml": NPML,
         "layer_depths": LAYER_DEPTHS,
+        "reflector": REFLECTOR,
         "z_src": Z_SRC,
         "receivers": (REC_TOP, REC_STEP, REC_MARGIN),
         "strong_dlambda": STRONG_DLAMBDA,
-        "strong_lam_z": STRONG_LAM_Z,
-        "ridge_a": {k: v for k, v in RIDGE_A.items() if not callable(v)},
         "ridge_a_dlambda_depth": RIDGE_A_DLAMBDA_DEPTH,
         "ridge_a_dlambda": RIDGE_A_DLAMBDA,
+        **{f"column_{kind}": stampable(params) for kind, params in COLUMNS.items()},
     }
 
 
@@ -164,12 +180,7 @@ def run_fdtd(quick, kind="ridge"):
     builder = IceModelBuilder(grid, column, surface=0.0, air=True)
     # A few reflectors so the movie shows returns as well as the direct wave.
     layer_depths = [d for d in LAYER_DEPTHS if d < zlim[1] - 20]
-    builder.add_layers(
-        [
-            Layer(depth=d, thickness=1.0, sigma_factor=3.0, undulations=[(2.0, 260.0, 0.7)])
-            for d in layer_depths
-        ]
-    )
+    builder.add_layers([Layer(depth=d, **REFLECTOR) for d in layer_depths])
     model = builder.finalize(npml=NPML)
 
     dt = 0.9 * max_time_step(model.eps_min, model.mu_min, model.dx, model.dz)

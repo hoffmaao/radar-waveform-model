@@ -458,6 +458,18 @@ def test_snapshot_cache_refuses_a_stamp_that_does_not_match(tmp_path):
         mod.load_snapshots(cache, stamp={"transition_width": 0.6, "dip_deg": 35.0,
                                          "layer_exclusion_band": (100.0, 130.0)})
 
+    # A parameter nested inside a mapping of constructor arguments is named as
+    # itself, not as the whole mapping having moved.
+    nested = mod.save_snapshots(
+        tmp_path / "nested.npz", *args,
+        stamp={"column": {"thickness": 1850.0, "sigma_ice": 1.2e-5}},
+    )
+    with pytest.raises(mod.StaleCache) as exc:
+        mod.load_snapshots(nested, stamp={"column": {"thickness": 1850.0,
+                                                     "sigma_ice": 9.9e-5}})
+    assert "column.sigma_ice: cache has 1.2e-05, model now has 9.9e-05" in str(exc.value)
+    assert "column.thickness" not in str(exc.value)
+
     # A cache from before stamping existed cannot be trusted either.
     unstamped = mod.save_snapshots(tmp_path / "old.npz", *args)
     with pytest.raises(mod.StaleCache, match="no model stamp"):

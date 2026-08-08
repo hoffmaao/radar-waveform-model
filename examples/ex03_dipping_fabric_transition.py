@@ -58,6 +58,7 @@ from _common import (
     load_snapshots,
     save_figure,
     save_snapshots,
+    stampable,
 )
 
 from radarwave import (
@@ -114,6 +115,19 @@ LAYER_GAP_HALFWIDTH = 15.0
 ABOVE = dict(lam_z=0.80, dlambda=0.03)   # lam = (0.115, 0.085, 0.80)
 BELOW = dict(lam_z=0.08, dlambda=0.80)   # lam = (0.860, 0.060, 0.08)
 
+# The background column as its constructor arguments, kept as a mapping rather
+# than written out at the call site so the cache stamp is taken from the same
+# values the column is built from and a parameter added later cannot escape it.
+# The ``dlambda`` callable closes over ABOVE, which is stamped in its own right.
+COLUMN = dict(
+    thickness=1850.0,
+    depth_bco=90.0,
+    sigma_ice=1.2e-5,
+    lam_z_sfc=ABOVE["lam_z"],
+    lam_z_bed=ABOVE["lam_z"],
+    dlambda=lambda d: np.full_like(np.asarray(d, float), ABOVE["dlambda"]),
+)
+
 
 def eigen_permittivity(lam_z, dlambda):
     """Solid-ice eigenpermittivities for a given (lam_z, dlam) pair."""
@@ -126,9 +140,7 @@ def eigen_permittivity(lam_z, dlambda):
 
 def build_models(xlim, zlim, dx):
     """Return the model with the fabric transition and its contrast-free twin."""
-    column = IceColumn(thickness=1850.0, depth_bco=90.0, sigma_ice=1.2e-5,
-                       lam_z_sfc=ABOVE["lam_z"], lam_z_bed=ABOVE["lam_z"],
-                       dlambda=lambda d: np.full_like(np.asarray(d, float), ABOVE["dlambda"]))
+    column = IceColumn(**COLUMN)
     grid = PropertyGrid.uniform(xlim, zlim, dx)
 
     def boundary(x):
@@ -142,7 +154,10 @@ def build_models(xlim, zlim, dx):
     _, _, pz = specular_geometry(0.0)
     t_event = column.two_way_time(pz, z0=Z_ANT) / np.cos(np.deg2rad(DIP_DEG))
     probe = np.linspace(0.0, zlim[1], 4001)
-    d_event = float(np.interp(t_event, column.two_way_time(probe, z0=Z_ANT), probe))
+    # Rounded to the millimetre: the band is 30 m wide, so nothing in the model
+    # can tell the difference, and it keeps a numpy release whose interpolation
+    # differs in the last digits from rejecting a cache as stale.
+    d_event = round(float(np.interp(t_event, column.two_way_time(probe, z0=Z_ANT), probe)), 3)
     exclude = (d_event - LAYER_GAP_HALFWIDTH, d_event + LAYER_GAP_HALFWIDTH)
     layers = conformal_layering(zlim[1], exclude=exclude)
 
@@ -220,7 +235,11 @@ def main(quick=False, render_only=False, radargram=False, processes=None, bare=F
     column, grid, model, twin, boundary, layers, exclude = build_models(xlim, zlim, dx)
     # Everything the cached wavefield and traces depend on.  A cache written
     # from a different model must not be re-rendered: its measured numbers would
-    # be printed beside predictions computed from the constants above.
+    # be printed beside predictions computed from the constants above.  The
+    # column goes in as the mapping it is built from, so a parameter of it that
+    # never reaches the derived band -- sigma_ice, which sets the recorded
+    # amplitudes but not any traveltime -- is still caught, and is named as
+    # itself rather than as the band having moved.
     stamp = {
         "dx": dx,
         "xlim": xlim,
@@ -236,6 +255,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None, bare=F
         "layer_exclusion_band": exclude,
         "fabric_above": ABOVE,
         "fabric_below": BELOW,
+        "column": stampable(COLUMN),
     }
     dt = 0.9 * max_time_step(model.eps_min, model.mu_min, model.dx, model.dz)
     t = np.arange(0.0, t_end, dt)

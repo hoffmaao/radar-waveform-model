@@ -310,9 +310,12 @@ def main(quick=False, radargram=False, processes=None, bare=False):
         )
         print(f"  done in {time.time() - t0:.1f} s")
         data = co.common_offset
-        _plot_section(data, co.src[:, 0], co.t, column, layers, Z_ANT, t_wave, bare)
+        # Persist before plotting.  Anything matplotlib does wrong downstream --
+        # including in the --bare path -- would otherwise throw away hours of
+        # simulation for the sake of a figure that can be redrawn in seconds.
         np.savez_compressed(OUT / "radargram.npz", data=data, t=co.t, x=co.src[:, 0])
-        print(f"  wrote {OUT / 'radargram.png'}")
+        _plot_section(data, co.src[:, 0], co.t, column, layers, Z_ANT, t_wave, bare)
+        print(f"  wrote {OUT / 'radargram.npz'}, {OUT / 'radargram.png'}")
 
 
 if __name__ == "__main__":

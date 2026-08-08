@@ -56,6 +56,18 @@ def save_figure(fig, path, bare=False):
     return path
 
 
+def stampable(params):
+    """Constructor arguments with the callables dropped.
+
+    A stamp is compared as text and a function object has no stable text, so a
+    callable argument cannot go in one.  Passing the whole argument mapping
+    through here rather than hand-listing its keys at the call site is what keeps
+    a parameter added later from escaping the guard; whatever the callables close
+    over is stamped separately alongside.
+    """
+    return {k: v for k, v in params.items() if not callable(v)}
+
+
 def _stamp_text(value):
     """Canonical text for one stamp entry.
 
@@ -83,6 +95,24 @@ def _stamp_text(value):
     return "(" + ", ".join(_stamp_text(v) for v in items) + ")"
 
 
+def _stamp_pairs(stamp, prefix=""):
+    """Flatten a stamp to ``{dotted name: text}``.
+
+    A mapping of constructor arguments is flattened rather than stamped whole, so
+    a mismatch inside one names the parameter that moved -- ``column.sigma_ice``
+    -- instead of printing two mappings and leaving the reader to find the
+    difference.
+    """
+    pairs = {}
+    for key, value in stamp.items():
+        name = f"{prefix}{key}"
+        if isinstance(value, dict):
+            pairs.update(_stamp_pairs(value, prefix=f"{name}."))
+        else:
+            pairs[name] = _stamp_text(value)
+    return pairs
+
+
 _STAMP_KEYS = "_stamp_keys"
 _STAMP_VALUES = "_stamp_values"
 _RESERVED = ("x", "z", "times", "labels", _STAMP_KEYS, _STAMP_VALUES)
@@ -90,7 +120,7 @@ _RESERVED = ("x", "z", "times", "labels", _STAMP_KEYS, _STAMP_VALUES)
 
 def _check_stamp(path, cached, stamp):
     """Raise :class:`StaleCache` unless ``cached`` matches ``stamp``."""
-    want = {k: _stamp_text(v) for k, v in stamp.items()}
+    want = _stamp_pairs(stamp)
     advice = (f"Rendering from it would draw the cached wavefield and trace under "
               f"the numbers predicted for the current model.  Delete {path} or "
               f"re-run without --render-only.")
@@ -125,9 +155,10 @@ def save_snapshots(path, panels, x, z, times, stamp=None, **extra):
         data[f"panel{k}"] = np.asarray(stack, dtype=np.float32)
     data.update({k: np.asarray(v) for k, v in extra.items()})
     if stamp is not None:
-        keys = sorted(stamp)
+        pairs = _stamp_pairs(stamp)
+        keys = sorted(pairs)
         data[_STAMP_KEYS] = np.array(keys)
-        data[_STAMP_VALUES] = np.array([_stamp_text(stamp[k]) for k in keys])
+        data[_STAMP_VALUES] = np.array([pairs[k] for k in keys])
     np.savez_compressed(path, **data)
     return path
 
