@@ -48,7 +48,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import echo_time, load_snapshots, save_snapshots
+from _common import echo_time, load_snapshots, save_figure, save_snapshots
 
 from radarwave import (
     C0,
@@ -76,6 +76,21 @@ Z_ANT = -1.0  # antenna 1 m above the snow surface
 
 DIP_DEG = 35.0  # dip of the fabric transition
 DEPTH_AT_X0 = 175.0  # depth of the transition below the surface at the antenna
+
+# Width of the blend across the transition, and what it costs.  A fabric
+# interface is a gradational thing in real ice -- fabric evolves with strain,
+# not in a step -- and the reflectivity is acutely sensitive to how gradational:
+# filtering the pulse through the interface gives -6.5 dB at 0.3 m, -14.5 dB at
+# 0.6 m, -25.5 dB at 1.2 m and -40 dB at 2.5 m, against a sharp step.  Roughly
+# 10-15 dB per doubling, so this constant is not cosmetic.  1.2 m is a little
+# under half a wavelength at 60 MHz: clearly gradational, still measurable.
+TRANSITION_WIDTH = 1.2
+
+# Layers whose two-way time coincides with the transition's would land their own
+# wavelet on top of it, and nothing downstream can separate two arrivals at the
+# same time.  This clears a band around the equivalent nadir depth; it has to
+# exceed the wavelet length plus the layer undulation amplitude (~4 m here).
+LAYER_GAP_HALFWIDTH = 15.0
 
 # Fabric either side of the transition: a vertical single maximum over a
 # horizontal one aligned with x.  Chosen so that lam_y barely changes across the
@@ -109,19 +124,31 @@ def build_models(xlim, zlim, dx):
     def boundary(x):
         return dipping_depth(x, DEPTH_AT_X0, DIP_DEG)
 
-    layers = conformal_layering(zlim[1])
+    # Which nadir depth would a layer have to sit at to arrive when the
+    # transition does?  Not the transition's own depth: the specular ray leaves
+    # at the dip angle, so it images at its perpendicular range.  Invert the
+    # column's own two-way time rather than dividing by a nominal velocity, so
+    # the firn is accounted for.
+    _, _, pz = specular_geometry(0.0)
+    t_event = column.two_way_time(pz, z0=Z_ANT) / np.cos(np.deg2rad(DIP_DEG))
+    probe = np.linspace(0.0, zlim[1], 4001)
+    d_event = float(np.interp(t_event, column.two_way_time(probe, z0=Z_ANT), probe))
+    layers = conformal_layering(
+        zlim[1],
+        exclude=(d_event - LAYER_GAP_HALFWIDTH, d_event + LAYER_GAP_HALFWIDTH),
+    )
 
     with_fabric = IceModelBuilder(grid, column, surface=0.0, air=True)
     with_fabric.add_layers(layers)
 
     # Blend across the transition rather than stepping across it.  A hard step
     # on a rectangular grid turns a 35 degree plane into a staircase, which
-    # scatters more strongly than the fabric contrast itself.  The blend has to
-    # stay well inside a wavelength though: smoothing over ~4 m (more than a
-    # wavelength at 60 MHz) makes the transition gradational and drops its
-    # reflectivity by tens of dB, which would hide the very return this example
-    # is about.  0.6 m is a few grid cells and about a fifth of a wavelength.
-    edge = np.tanh((with_fabric.depth - boundary(grid.x)[:, None]) / 0.6)
+    # scatters more strongly than the fabric contrast itself.  The blend is not
+    # free: see TRANSITION_WIDTH for what each width costs.  It is a physical
+    # parameter of the model, not a numerical detail -- how sharp a fabric
+    # transition has to be before a radar can see it is the question this
+    # example is really asking.
+    edge = np.tanh((with_fabric.depth - boundary(grid.x)[:, None]) / TRANSITION_WIDTH)
     frac = 0.5 * (1.0 + edge)
 
     # Taper the contrast away near the side boundaries so the transition ends
@@ -171,7 +198,7 @@ def specular_geometry(x_antenna=0.0):
     return slant_range, px, pz
 
 
-def main(quick=False, render_only=False, radargram=False, processes=None):
+def main(quick=False, render_only=False, radargram=False, processes=None, bare=False):
     use_talk_style()
     OUT.mkdir(parents=True, exist_ok=True)
     cache = OUT / "snapshots.npz"
@@ -324,6 +351,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
             f"antenna. A fabric "
             "contrast can never exceed about -51 dB, so it sits well below the layering."
         ),
+        bare=bare,
     )
     print(f"  wrote {OUT / 'dipping_fabric.mp4'}")
 
@@ -403,7 +431,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
         f"polarisation contrast {ratio:.0f} dB", loc="left",
     )
     fig.tight_layout()
-    fig.savefig(OUT / "geometry.png")
+    save_figure(fig, OUT / "geometry.png", bare)
     plt.close(fig)
     print(f"  wrote {OUT / 'geometry.png'}")
 
@@ -427,7 +455,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
         loc="left",
     )
     fig.tight_layout()
-    fig.savefig(OUT / "permittivity_jump.png")
+    save_figure(fig, OUT / "permittivity_jump.png", bare)
     plt.close(fig)
     print(f"  wrote {OUT / 'permittivity_jump.png'}")
 
@@ -484,7 +512,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
             x=0.008, ha="left", fontsize=15,
         )
         fig.tight_layout(rect=(0, 0, 1, 0.95))
-        fig.savefig(OUT / "radargram.png")
+        save_figure(fig, OUT / "radargram.png", bare)
         plt.close(fig)
         print(f"  wrote {OUT / 'radargram.png'}")
 
@@ -495,6 +523,8 @@ if __name__ == "__main__":
     p.add_argument("--render-only", action="store_true")
     p.add_argument("--radargram", action="store_true")
     p.add_argument("--processes", type=int, default=None)
+    p.add_argument("--bare", action="store_true",
+                   help="strip titles, notes, annotations and legends for slides")
     a = p.parse_args()
-    main(quick=a.quick, render_only=a.render_only, radargram=a.radargram,
+    main(quick=a.quick, render_only=a.render_only, radargram=a.radargram, bare=a.bare,
          processes=a.processes)

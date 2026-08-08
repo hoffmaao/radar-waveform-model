@@ -13,6 +13,7 @@ from .polarimetry import analytic
 
 __all__ = [
     "use_talk_style",
+    "strip_text",
     "wavefield_movie",
     "plot_radargram",
     "radargram_reference",
@@ -75,6 +76,67 @@ def use_talk_style():
             "image.interpolation": "nearest",
         }
     )
+
+
+def _is_colorbar(ax):
+    return getattr(ax, "_colorbar", None) is not None or ax.get_label() == "<colorbar>"
+
+
+def _all_axes(fig):
+    """Every axes in ``fig``, insets included.
+
+    ``Axes.inset_axes`` does not register with the figure -- an inset lives in
+    its parent's ``child_axes`` and never appears in ``fig.axes`` -- so walking
+    the figure alone silently skips them.
+    """
+    stack, found = list(fig.axes), []
+    while stack:
+        ax = stack.pop()
+        found.append(ax)
+        stack.extend(getattr(ax, "child_axes", []))
+    return found
+
+
+def strip_text(fig, *, keep_colorbars=True):
+    """Strip the words from a figure, leaving the axes readable.
+
+    A slide usually wants the figure to carry the picture and the speaker to
+    carry the words.  This removes every title, figure-level note, in-plot
+    annotation and legend, and leaves the axis lines, ticks, tick numbers and
+    axis labels alone, so scale can still be read straight off the plot.
+
+    Lines and markers are untouched -- a guide line keeps its dashes and loses
+    only its caption, and layer markers keep their dotted rules.
+
+    Colourbar axes are skipped by default: their tick numbers and label are
+    what make the colour mapping quantitative, so removing them would take
+    information out of the figure rather than clutter.
+
+    This runs after a figure is built rather than being threaded through every
+    text call, so there is one place to change and the annotated version stays
+    available from the same code.
+    """
+    # The suptitle lives in ``fig.texts`` as well as in ``fig._suptitle``.
+    # Removing it leaves that second reference dangling, and the next
+    # ``tight_layout`` crashes measuring an artist with no figure -- so blank it
+    # instead and leave it attached.  An empty title measures zero height.
+    sup = getattr(fig, "_suptitle", None)
+    for txt in list(fig.texts):
+        if txt is not sup:
+            txt.remove()
+    if sup is not None:
+        sup.set_text("")
+    for ax in _all_axes(fig):
+        if keep_colorbars and _is_colorbar(ax):
+            continue
+        for loc in ("center", "left", "right"):
+            ax.set_title("", loc=loc)
+        legend = ax.get_legend()
+        if legend is not None:
+            legend.remove()
+        for txt in list(ax.texts):
+            txt.remove()
+    return fig
 
 
 def spreading_gain(t, power=0.5, t0=None):
@@ -150,10 +212,12 @@ def wavefield_movie(
     follow=None,
     guide=None,
     trace=None,
+    trace_width=0.72,
     dpi=112,
     crf=24,
     also_gif=False,
     progress=True,
+    bare=False,
 ):
     """Render a wavefield time series to an MP4 movie.
 
@@ -271,10 +335,14 @@ def wavefield_movie(
         total = w * (1.0 if len(panels) == 1 else 0.62 * len(panels) + 0.4)
         figsize = (max(total, 9.0 if len(panels) > 1 else 6.5), h)
     if trace:
-        figsize = (figsize[0] + 4.2, figsize[1])
+        # Scale the extra canvas with the panel, so narrowing the trace gives
+        # the wavefield the space back instead of leaving a gap -- but keep a
+        # floor: tick labels and the axis label need a fixed number of inches
+        # whatever the ratio, and below about 3 they run off the canvas.
+        figsize = (figsize[0] + max(3.0, 5.8 * trace_width), figsize[1])
 
     n_field = len(panels)
-    widths = [1.0] * n_field + ([0.72] if trace else [])
+    widths = [1.0] * n_field + ([trace_width] if trace else [])
     fig, grid_axes = plt.subplots(
         1, n_field + (1 if trace else 0), figsize=figsize, dpi=dpi,
         squeeze=False, width_ratios=widths,
@@ -373,9 +441,14 @@ def wavefield_movie(
         trace_ax.set_xlim(*trace.get("xlim", (-100.0, 5.0) if trace.get("db", True)
                                      else (-1.15, 1.15)))
         trace_ax.set_ylim(trace.get("tlim", t_tr[-1]) * 1e6, 0.0)
+        # Wrap onto two lines below a narrow panel: on one line this label is
+        # wider than its own column once ``trace_width`` drops much under 0.7,
+        # and it runs off the canvas rather than shrinking the axes.
+        wrapped = trace_width < 0.62
         trace_ax.set_xlabel(trace.get(
             "xlabel",
-            "returned power (dB re. transmit pulse)" if trace.get("db", True)
+            ("returned power\n(dB re. transmit pulse)" if wrapped
+             else "returned power (dB re. transmit pulse)") if trace.get("db", True)
             else "amplitude",
         ))
         trace_ax.set_ylabel("two-way time (us)")
@@ -398,6 +471,14 @@ def wavefield_movie(
         bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.85),
     )
     fig.tight_layout(rect=(0, 0, 1, 0.93 if subtitle else 0.96))
+    if bare:
+        # Strip after building rather than skipping the calls, so there is one
+        # code path.  The clock and the guide caption are detached artists
+        # afterwards; the per-frame updates below still run and simply draw
+        # nothing.  Re-layout to the full canvas or the reserved title band
+        # stays behind as an empty stripe at the top of every frame.
+        strip_text(fig)
+        fig.tight_layout(rect=(0, 0, 1, 1))
 
     # Constant-rate-factor encoding rather than a fixed quality level: the
     # amplitude-compressed wavefield is full of fine detail that a qscale

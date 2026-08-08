@@ -15,7 +15,13 @@ from radarwave.polarimetry import (
     unwrap_phase,
     volume_scattering,
 )
-from radarwave.scenes import IceModelBuilder, Layer, dipping_depth, undulating_depth
+from radarwave.scenes import (
+    IceModelBuilder,
+    Layer,
+    conformal_layering,
+    dipping_depth,
+    undulating_depth,
+)
 
 FC = 195e6
 
@@ -300,3 +306,80 @@ def test_analytic_handles_a_2d_stack():
     z = analytic(data, axis=0)
     assert z.shape == data.shape
     np.testing.assert_allclose(np.real(z), data, rtol=1e-9, atol=1e-12)
+
+
+def test_conformal_layering_clears_an_excluded_band():
+    """A band asked for is left empty, and only that band changes.
+
+    The exclusion must not shift the random stream: two models built from the
+    same seed have to share their stratigraphy everywhere outside the band, or
+    a run with the gap is not comparable with one without it.
+    """
+    band = (125.0, 155.0)
+    full = conformal_layering(300.0, seed=7)
+    gapped = conformal_layering(300.0, seed=7, exclude=band)
+
+    assert [lay.depth for lay in full if band[0] <= lay.depth <= band[1]]
+    assert not [lay.depth for lay in gapped if band[0] <= lay.depth <= band[1]]
+
+    outside = [lay for lay in full if not band[0] <= lay.depth <= band[1]]
+    assert len(outside) == len(gapped)
+    for a, b in zip(outside, gapped):
+        assert a.depth == b.depth
+        assert a.thickness == b.thickness
+        assert a.d_rho == b.d_rho
+        assert a.sigma_factor == b.sigma_factor
+
+
+def test_conformal_layering_accepts_several_excluded_bands():
+    bands = [(60.0, 80.0), (200.0, 230.0)]
+    layers = conformal_layering(300.0, seed=3, exclude=bands)
+    for lo, hi in bands:
+        assert not [lay.depth for lay in layers if lo <= lay.depth <= hi]
+    assert len(layers) > 3
+
+
+def test_strip_text_clears_titles_annotations_and_insets():
+    """--bare has to reach inset axes, which are not in ``fig.axes``.
+
+    Axis labels, tick labels and colourbar text are deliberately kept: they are
+    what lets a slide still be read quantitatively.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from radarwave.viz import strip_text
+
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.arange(9).reshape(3, 3))
+    cb = fig.colorbar(im)
+    cb.set_label("colourbar label")
+    fig.suptitle("figure title")
+    fig.text(0.1, 0.9, "figure note")
+    ax.set_title("axes title", loc="left")
+    ax.set_xlabel("distance (m)")
+    ax.set_ylabel("depth (m)")
+    ax.annotate("in-plot label", (1, 1))
+    ax.plot([0, 1], [0, 1], label="a line")
+    ax.legend()
+    inset = ax.inset_axes([0.5, 0.5, 0.4, 0.4])
+    inset.set_title("inset title")
+
+    strip_text(fig)
+
+    # The suptitle stays attached but blank: removing it leaves ``fig._suptitle``
+    # dangling and the next tight_layout dies measuring it.  Every other
+    # figure-level text goes.
+    assert fig._suptitle.get_text() == ""
+    assert [t.get_text() for t in fig.texts] == [""]
+    assert ax.get_title(loc="left") == ""
+    assert list(ax.texts) == []
+    assert ax.get_legend() is None
+    assert inset.get_title() == ""
+    # kept: the axes stay readable
+    assert ax.get_xlabel() == "distance (m)"
+    assert ax.get_ylabel() == "depth (m)"
+    assert cb.ax.get_ylabel() == "colourbar label"
+    plt.close(fig)

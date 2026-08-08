@@ -31,7 +31,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import echo_time
+from _common import echo_time, save_figure
 
 from radarwave import (
     C0,
@@ -63,7 +63,7 @@ Z_ANT = -1.0  # antenna 1 m above the snow surface
 T_MAX = 5.9e-6
 
 
-def _plot_section(data, positions, t, column, layers, z_ant, t_wave):
+def _plot_section(data, positions, t, column, layers, z_ant, t_wave, bare=False):
     """Draw the common-offset section the way a processed radargram is shown."""
     import matplotlib.pyplot as plt
     from radarwave.polarimetry import analytic
@@ -94,16 +94,20 @@ def _plot_section(data, positions, t, column, layers, z_ant, t_wave):
     ax.annotate("blue: layers put into the model", (0.015, 0.03),
                 xycoords="axes fraction", fontsize=11, color="#2166ac")
     fig.tight_layout()
-    fig.savefig(OUT / "radargram.png")
+    save_figure(fig, OUT / "radargram.png", bare)
     plt.close(fig)
 
 
-def main(quick=False, radargram=False, processes=None):
+def main(quick=False, radargram=False, processes=None, bare=False):
     use_talk_style()
     OUT.mkdir(parents=True, exist_ok=True)
 
     dx = 0.5 if quick else 0.30
-    xlim = (-60.0, 60.0) if quick else (-105.0, 105.0)
+    # Wide enough that the wavefront is not clipped by the boundary before it
+    # reaches the deepest layers: at 450 m the front already spanned the old
+    # +/-105 m domain, so the picture was a slice of the wave rather than the
+    # wave.  Costs ~1.7x the cells, which the movie is worth.
+    xlim = (-60.0, 60.0) if quick else (-180.0, 180.0)
     zlim = (-12.0, 160.0) if quick else (-12.0, 560.0)
     t_end = 2.2e-6 if quick else 6.2e-6
 
@@ -198,6 +202,8 @@ def main(quick=False, radargram=False, processes=None):
             "the antenna records, filling in as the wave travels. Dotted lines mark the "
             "two-way time of each layer put into the model."
         ),
+        bare=bare,
+        trace_width=0.42,
     )
     print(f"  wrote {OUT / 'wavefield.mp4'}")
 
@@ -228,7 +234,7 @@ def main(quick=False, radargram=False, processes=None):
     axes[2].axhline(column.depth_bco, color="#888", ls="--", lw=1)
     axes[2].annotate("bubble close-off", (0.45, column.depth_bco - 6), fontsize=11, color="#222")
     fig.tight_layout()
-    fig.savefig(OUT / "model.png")
+    save_figure(fig, OUT / "model.png", bare)
     plt.close(fig)
 
     # ---- recorded trace ------------------------------------------------
@@ -274,7 +280,7 @@ def main(quick=False, radargram=False, processes=None):
         "(blue)", x=0.01, ha="left", fontsize=15,
     )
     fig.tight_layout()
-    fig.savefig(OUT / "trace.png")
+    save_figure(fig, OUT / "trace.png", bare)
     plt.close(fig)
     print(f"  wrote {OUT / 'model.png'}, {OUT / 'trace.png'}")
 
@@ -293,7 +299,7 @@ def main(quick=False, radargram=False, processes=None):
         )
         print(f"  done in {time.time() - t0:.1f} s")
         data = co.common_offset
-        _plot_section(data, co.src[:, 0], co.t, column, layers, Z_ANT, t_wave)
+        _plot_section(data, co.src[:, 0], co.t, column, layers, Z_ANT, t_wave, bare)
         np.savez_compressed(OUT / "radargram.npz", data=data, t=co.t, x=co.src[:, 0])
         print(f"  wrote {OUT / 'radargram.png'}")
 
@@ -303,5 +309,7 @@ if __name__ == "__main__":
     p.add_argument("--quick", action="store_true", help="small, fast version")
     p.add_argument("--radargram", action="store_true", help="also run a multi-shot section")
     p.add_argument("--processes", type=int, default=None, help="parallel shots")
+    p.add_argument("--bare", action="store_true",
+                   help="strip titles, notes, annotations and legends for slides")
     a = p.parse_args()
-    main(quick=a.quick, radargram=a.radargram, processes=a.processes)
+    main(quick=a.quick, radargram=a.radargram, processes=a.processes, bare=a.bare)

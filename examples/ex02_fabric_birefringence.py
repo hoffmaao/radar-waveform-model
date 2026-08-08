@@ -46,7 +46,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import load_snapshots, save_snapshots
+from _common import load_snapshots, save_figure, save_snapshots
 
 from radarwave import (
     C0,
@@ -184,8 +184,29 @@ def run_fdtd(quick, kind="ridge"):
     return column, model, grid, dt, runs, src, rec, xlim, zlim, fpeak, z_src, t_wave
 
 
-def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_path):
-    """Four monostatic traces: two fabrics x two eigenpolarisations.
+def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_path,
+                      bare=False):
+    """Eight monostatic traces: two fabrics x four transmit/receive pairings.
+
+    The top row is the two eigenpolarisations.  Those are the fabric's own
+    modes, so they do not interfere, and their amplitudes are identical to
+    within the ~0.05 dB their reflection coefficients differ by -- the layers
+    are isotropic, so both polarisations see the same reflector.  The fabric
+    shows up in *when* they arrive, not in how strong they are.
+
+    The bottom row is what an antenna at 45 degrees to the principal axes
+    records, which is what a real survey usually measures.  A 45 degree launch
+    is not an eigenmode: it is the two eigenmodes at equal amplitude.  They
+    propagate independently -- the fabric orientation is fixed with depth here,
+    so no energy is exchanged -- and recombine at the receiver with whatever
+    differential phase they have accumulated.  Co-pol adds them and cross-pol
+    differences them, so both beat through nulls as that phase passes multiples
+    of pi.  That beating is the amplitude signature polarimetric sounding
+    actually lives on, and it is absent from the eigenpolarisation panels by
+    construction.
+
+    Nothing here needs a new simulation: the superposition is exact whenever the
+    eigenaxes do not rotate with depth.
 
     Plotted as returned power in dB against two-way time, the way a processed
     sounding is shown, on one shared reference so the panels are directly
@@ -193,12 +214,27 @@ def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_p
     """
     import matplotlib.pyplot as plt
 
-    order = [("ridge", "perp"), ("ridge", "par"), ("strong", "perp"), ("strong", "par")]
-    names = {"perp": f"{PERP_AZ} deg (slow)", "par": f"{PAR_AZ} deg (fast)"}
+    eigen = [("ridge", "perp"), ("ridge", "par"), ("strong", "perp"), ("strong", "par")]
+    mixed = [("ridge", "co"), ("ridge", "cross"), ("strong", "co"), ("strong", "cross")]
+    order = eigen + mixed
+    names = {
+        "perp": f"E along {PERP_AZ} deg (slow)",
+        "par": f"E along {PAR_AZ} deg (fast)",
+        "co": "45 deg launch, co-pol",
+        "cross": "45 deg launch, cross-pol",
+    }
+    colours = {"perp": "#2166ac", "par": "#b2182b", "co": "#6a3d9a", "cross": "#1b7837"}
     titles = {"ridge": "Ridge A fabric", "strong": f"strong fabric (dlam = {STRONG_DLAMBDA:g})"}
 
-    env = {(k, w): np.abs(analytic(surface[k][w])) for k, w in order}
-    ref = max(float(v.max()) for v in env.values())
+    def trace_of(k, w):
+        if w in ("perp", "par"):
+            return np.asarray(surface[k][w], dtype=float)
+        slow = np.asarray(surface[k]["perp"], dtype=float)
+        fast = np.asarray(surface[k]["par"], dtype=float)
+        return 0.5 * (slow + fast) if w == "co" else 0.5 * (slow - fast)
+
+    env = {(k, w): np.abs(analytic(trace_of(k, w))) for k, w in order}
+    ref = max(float(env[key].max()) for key in eigen)
     z_src_of = {k: float(v[2]) for k, v in measured.items()}
 
     def arrival(col, depth, axis, kind):
@@ -227,14 +263,32 @@ def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_p
     zoom_depth = max(_use) if _use else max(layer_depths)
     t_ref = arrival(_ref_col, zoom_depth, 1, "ridge")
 
-    fig, axes = plt.subplots(1, 4, figsize=(17.5, 8.4), sharey=True)
-    for ax, (k, w) in zip(axes, order):
+    curves = {}
+    for k, w in order:
+        with np.errstate(divide="ignore"):
+            curves[(k, w)] = 20 * np.log10(np.maximum(env[(k, w)] / ref, 1e-12))
+
+    # One inset window *and one inset amplitude range* for every panel.  The
+    # caption claims the windows are comparable, so the axes have to actually be
+    # shared -- letting each autoscale makes two panels look alike that are 10 dB
+    # apart.
+    ins_lo, ins_hi = np.inf, -np.inf
+    for k, w in order:
+        t = surface[k]["t"]
+        band = np.abs(t - t_ref) < 65e-9
+        if band.any():
+            ins_lo = min(ins_lo, float(curves[(k, w)][band].min()))
+            ins_hi = max(ins_hi, float(curves[(k, w)][band].max()))
+
+    fig, axes = plt.subplots(2, 4, figsize=(17.5, 13.6), sharey=True)
+    for ax, (k, w) in zip(axes.flat, order):
         t = surface[k]["t"]
         col = column_of(k)
-        axis = 1 if w == "par" else 0
-        with np.errstate(divide="ignore"):
-            db = 20 * np.log10(np.maximum(env[(k, w)] / ref, 1e-12))
-        colour = "#b2182b" if w == "par" else "#2166ac"
+        # The mixed pairings carry both eigenmodes, so mark their layers on the
+        # mean axis rather than on either one.
+        axis = {"par": 1, "perp": 0}.get(w, None)
+        db = curves[(k, w)]
+        colour = colours[w]
         ax.plot(db, t * 1e6, lw=1.0, color=colour)
 
         for d in layer_depths:
@@ -242,7 +296,7 @@ def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_p
         ax.set_xlim(-118, 5)
         ax.set_ylim((t[-1] - 0.25e-6) * 1e6, 0)
         ax.set_xlabel("returned power\n(dB re. transmit pulse)")
-        ax.set_title(f"{titles[k]}\nE along {names[w]}", loc="left", fontsize=12)
+        ax.set_title(f"{titles[k]}\n{names[w]}", loc="left", fontsize=12)
         ax.grid(alpha=0.2)
 
         # Zoom on the deepest return: the shift is tens of ns against a record
@@ -251,13 +305,13 @@ def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_p
         ins.plot(db, t * 1e6, lw=1.3, color=colour)
         ins.axhline(t_ref * 1e6, color="#111", ls="--", lw=1.1)
         ins.set_ylim((t_ref + 60e-9) * 1e6, (t_ref - 60e-9) * 1e6)
-        band = np.abs(t - t_ref) < 65e-9
-        ins.set_xlim(db[band].min() - 3, db[band].max() + 5)
+        ins.set_xlim(ins_lo - 3, ins_hi + 5)
         ins.tick_params(labelsize=8)
-        ins.set_title(f"{zoom_depth:.0f} m return, same window in all four",
+        ins.set_title(f"{zoom_depth:.0f} m return, same window in all eight",
                       fontsize=8.5, loc="left", pad=2)
         ins.grid(alpha=0.25)
-    axes[0].set_ylabel("two-way time (us)")
+    axes[0, 0].set_ylabel("two-way time (us)")
+    axes[1, 0].set_ylabel("two-way time (us)")
 
     # Quantify both effects on the deepest layer: how much later the slow
     # polarisation arrives, and whether its amplitude differs at all.
@@ -289,26 +343,40 @@ def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_p
             continue
         shift = subsample_lag(a_par, a_perp, t[1] - t[0])
         model = float(col.birefringent_delay(deepest) - col.birefringent_delay(zs))
+        # The eigenpolarisations carry no amplitude signature -- the layers are
+        # isotropic, so both see the same reflector and the only difference is
+        # the ~0.05 dB their reflection coefficients differ by.  The amplitude
+        # signature appears once the launch is *not* an eigenmode: the same
+        # delay becomes a differential phase, and co- and cross-pol beat through
+        # a null every half cycle of it.
+        cycles = abs(float(col.birefringent_delay(deepest))) * FC
         notes.append(
             f"{titles[k]}: the {PERP_AZ} deg return from {deepest:.0f} m arrives "
             f"{shift * 1e9:.2f} ns later than {PAR_AZ} deg (traveltime model "
             f"{model * 1e9:.2f} ns); down at {float(np.asarray(rec_z)[-1]):.0f} m the two "
-            f"are still within {abs(float(np.asarray(amp_db)[-1])):.2f} dB in amplitude."
+            f"are still within {abs(float(np.asarray(amp_db)[-1])):.2f} dB in amplitude. "
+            f"That delay is {cycles:.2f} cycles at {FC / 1e6:.0f} MHz, so a 45 deg launch "
+            f"beats through {2 * cycles:.1f} nulls by {deepest:.0f} m."
         )
 
-    fig.suptitle(
-        "Monostatic traces: the fabric changes when the reflections arrive, not how "
-        "strong they are.\nDotted lines mark each layer; the inset magnifies the deepest "
-        "return, dashed line at the fast-axis arrival.\n" + "\n".join(notes),
-        x=0.008, ha="left", fontsize=12.5,
-    )
-    fig.tight_layout(rect=(0, 0, 1, 0.86))
-    fig.savefig(out_path)
+    header = [
+        "Top row, the fabric's own eigenpolarisations: it changes when the reflections "
+        "arrive, not how strong they are.",
+        "Bottom row, a 45 deg launch, which is what a survey actually transmits: the two "
+        "modes recombine and beat, so the same delay now shows up as amplitude.",
+        "Dotted lines mark each layer; the inset magnifies the deepest return, dashed "
+        "line at the fast-axis arrival.",
+    ] + notes
+    fig.suptitle("\n".join(header), x=0.008, ha="left", fontsize=12.5)
+    # Reserve exactly the band the header needs.  A fixed fraction left a dead
+    # stripe when the notes were shorter than the space set aside for them.
+    fig.tight_layout(rect=(0, 0, 1, 1.0 - 0.020 * len(header) - 0.010))
+    save_figure(fig, out_path, bare)
     plt.close(fig)
     return notes
 
 
-def main(quick=False, render_only=False):
+def main(quick=False, render_only=False, bare=False):
     use_talk_style()
     OUT.mkdir(parents=True, exist_ok=True)
     cache = OUT / "snapshots.npz"
@@ -438,6 +506,7 @@ def main(quick=False, render_only=False):
             "wavefront in both panels. Right: what the receiver records - the two return "
             "pulses come back at the same amplitude, only shifted in time."
         ),
+        bare=bare,
     )
     print(f"  wrote {OUT / 'birefringence.mp4'}")
 
@@ -564,7 +633,7 @@ def main(quick=False, render_only=False):
         x=0.008, ha="left", fontsize=15,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.94))
-    fig.savefig(OUT / "birefringence.png")
+    save_figure(fig, OUT / "birefringence.png", bare)
     plt.close(fig)
 
     notes = received_waveforms(
@@ -572,6 +641,7 @@ def main(quick=False, render_only=False):
         list(LAYER_DEPTHS),
         measured, t_wave,
         OUT / "received.png",
+        bare,
     )
     print(f"  wrote {OUT / 'received.png'}")
     for line in notes:
@@ -594,5 +664,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--quick", action="store_true")
     p.add_argument("--render-only", action="store_true")
+    p.add_argument("--bare", action="store_true",
+                   help="strip titles, notes, annotations and legends for slides")
     a = p.parse_args()
-    main(quick=a.quick, render_only=a.render_only)
+    main(quick=a.quick, render_only=a.render_only, bare=a.bare)

@@ -32,6 +32,20 @@ def echo_time(column, depth, z_ant, t_wave, dip_deg=0.0):
     return column.two_way_time(np.asarray(depth, dtype=float), z0=z_ant) * sec + t_wave
 
 
+def save_figure(fig, path, bare=False):
+    """Write ``fig``, stripping its words first when ``bare``.
+
+    Every example saves through here so ``--bare`` cannot be wired into some
+    figures and forgotten in others.
+    """
+    if bare:
+        from radarwave.viz import strip_text
+
+        strip_text(fig)
+    fig.savefig(path)
+    return path
+
+
 def save_snapshots(path, panels, x, z, times, **extra):
     """Cache snapshot stacks and their axes to a compressed ``.npz``."""
     path = Path(path)
