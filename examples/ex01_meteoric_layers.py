@@ -10,8 +10,9 @@ reflects off the dielectric contrasts that make up meteoric internal layering:
 
 The layers are conformable: every one shares a single undulation shape with the
 amplitude growing downwards, matching the stratigraphy in the 350-450 m window
-of the Ridge A radargram.  Example 3 uses exactly this layering and adds a
-fabric transition cutting across it.
+of the Ridge A radargram.  Example 3 uses this same layering, minus a band
+cleared around its fabric transition's arrival, and adds the transition cutting
+across it.
 
 Outputs (in ``figures/ex01/``)
 
@@ -19,6 +20,8 @@ Outputs (in ``figures/ex01/``)
 * ``model.png``       -- permittivity and conductivity of the ice model
 * ``trace.png``       -- the recorded trace, with the layer depths marked
 * ``radargram.png``   -- a common-offset section (with ``--radargram``)
+* ``radargram.npz``   -- the section's samples, saved before plotting so the
+  figure can be redrawn without re-running the shots
 
 Run with ``--quick`` for a small, fast version while iterating.
 """

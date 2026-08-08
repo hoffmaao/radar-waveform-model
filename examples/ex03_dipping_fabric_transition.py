@@ -3,8 +3,8 @@
 The Ridge A radargram shows a faint, steeply dipping feature at 1000-1500 m
 labelled "Deep Fabric Fold?".  This example models what produces it.
 
-The scene is a sharp change in crystal-orientation fabric across a plane
-dipping at 35 degrees.  Two things follow from that geometry, and both are the
+The scene is a strong change in crystal-orientation fabric across a plane
+dipping at 35 degrees, blended over ``TRANSITION_WIDTH`` rather than stepped.  Two things follow from that geometry, and both are the
 point of the example:
 
 1. **The energy that comes back to the antenna is not from beneath it.**  A

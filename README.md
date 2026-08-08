@@ -34,7 +34,9 @@ python examples/ex03_dipping_fabric_transition.py --radargram --processes 10
 ```
 
 Add `--quick` to any of them for a small, fast version while iterating on the
-model, and `--render-only` (examples 2 and 3) to re-render the movie from cached
+model, `--bare` to strip titles, figure notes, in-plot annotations and legends
+for slides - axis lines, ticks, tick numbers, axis labels and colourbars stay -
+and `--render-only` (examples 2 and 3) to re-render the movie from cached
 snapshots without repeating the simulation. Each cache carries a stamp of the
 parameters that define its model, and `--render-only` refuses one that does not
 match - otherwise changing a model constant renders the old wavefield and the
@@ -170,8 +172,12 @@ against the observed interferogram.
 
 ### 3. Dipping fabric transition
 
-A sharp fabric change across a plane dipping at 35 degrees, 175 m below the
-surface. Two consequences, and they are the point of the example:
+A strong fabric change across a plane dipping at 35 degrees, 175 m below the
+surface, blended over 1.2 m rather than stepped - real fabric evolves with
+strain, and the blending is priced: it costs the return about 25.5 dB against
+the step-interface numbers quoted below (`TRANSITION_WIDTH` in the example
+carries the cost curve). Two consequences, and they are the point of the
+example:
 
 **The energy that returns is not from beneath the antenna.** A monostatic
 antenna records a specular return only from where the interface normal points
@@ -209,7 +215,10 @@ the bright axis from the permittivities rather than assuming it.
 The scene also carries ordinary conformable meteoric layering - all the layers
 share one undulation shape with the amplitude growing downwards - so the fabric
 transition reads as a discordant feature cutting across a conformable
-background, which is what the radargram looks like.
+background, which is what the radargram looks like. One gap in that background
+is deliberate: a 30 m band of layers around the depth whose two-way time
+matches the transition's arrival is left clear, so the faint fabric echo stands
+alone in its window instead of under a layer wavelet.
 
 The movie has the wave propagating on the left and, on the right, the trace the
 surface receiver is building up: returned power in dB across, two-way time down,
