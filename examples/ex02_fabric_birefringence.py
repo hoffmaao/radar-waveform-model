@@ -35,7 +35,8 @@ not for the numbers.  The convergence figures are in the README's "Resolution"
 section.
 
 Outputs land in ``figures/ex02/``.  ``--render-only`` re-renders the movie from
-the cached snapshots without re-running the simulation.
+the cached snapshots without re-running the simulation, and refuses a cache that
+was written from a different model.
 """
 
 import argparse
@@ -46,7 +47,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import load_snapshots, save_figure, save_snapshots
+from _common import StaleCache, load_snapshots, save_figure, save_snapshots
 
 from radarwave import (
     C0,
@@ -60,7 +61,7 @@ from radarwave import (
     max_time_step,
     ridge_a_dlambda,
 )
-from radarwave.ice import RIDGE_A
+from radarwave.ice import RIDGE_A, RIDGE_A_DLAMBDA, RIDGE_A_DLAMBDA_DEPTH
 from radarwave.polarimetry import (
     analytic,
     delay_from_phase,
@@ -81,6 +82,8 @@ FC_MCORDS = 195e6  # centre frequency of the real Ridge A product
 NPML = 12
 PERP_AZ, PAR_AZ = 89, 179  # horizontal principal axes, degrees east of north
 LAYER_DEPTHS = (60.0, 130.0, 210.0, 300.0, 420.0, 560.0, 700.0)  # acidity horizons
+Z_SRC = 3.0  # antenna buried a few metres into the firn
+REC_TOP, REC_STEP, REC_MARGIN = 40.0, 20.0, 25.0  # nadir receiver string
 
 
 #: Essentially the strongest horizontal fabric ice can have: every c-axis lying
@@ -106,19 +109,55 @@ def make_column(kind):
     )
 
 
+def fdtd_geometry(quick):
+    """Return ``(dx, xlim, zlim, t_end)`` for the FDTD pair.
+
+    Narrow and deep.  Nothing here needs width - the wave goes straight down and
+    the first Fresnel zone at 800 m is only ~30 m across - but depth is exactly
+    what the demonstration needs, because the separation between the two
+    eigenpolarisations grows linearly with distance travelled.
+
+    ``t_end`` is long enough for the deepest layer's echo to come back, not just
+    for the downgoing wave to cross the model: the received-waveform figure needs
+    the reflections.  The movie only uses the first part, while the wave is on
+    its way down.
+
+    Split out of :func:`run_fdtd` so the cache stamp is read from the same place
+    the run is, and cannot drift away from it.
+    """
+    if quick:
+        return 0.5, (-45.0, 45.0), (-8.0, 150.0), 2.2e-6
+    return 0.26, (-45.0, 45.0), (-8.0, 800.0), 8.6e-6
+
+
+def cache_stamp(quick):
+    """Everything the cached snapshots, traces and delays depend on.
+
+    Re-rendering a cache written from a different model would put its measured
+    delays and amplitudes beside the traveltime numbers computed here from the
+    current constants, with nothing in the figure to say so.
+    """
+    dx, xlim, zlim, t_end = fdtd_geometry(quick)
+    return {
+        "dx": dx,
+        "xlim": xlim,
+        "zlim": zlim,
+        "t_end": t_end,
+        "fc": FC,
+        "npml": NPML,
+        "layer_depths": LAYER_DEPTHS,
+        "z_src": Z_SRC,
+        "receivers": (REC_TOP, REC_STEP, REC_MARGIN),
+        "strong_dlambda": STRONG_DLAMBDA,
+        "strong_lam_z": STRONG_LAM_Z,
+        "ridge_a": {k: v for k, v in RIDGE_A.items() if not callable(v)},
+        "ridge_a_dlambda_depth": RIDGE_A_DLAMBDA_DEPTH,
+        "ridge_a_dlambda": RIDGE_A_DLAMBDA,
+    }
+
+
 def run_fdtd(quick, kind="ridge"):
-    # Narrow and deep.  Nothing here needs width - the wave goes straight down
-    # and the first Fresnel zone at 800 m is only ~30 m across - but depth is
-    # exactly what the demonstration needs, because the separation between the
-    # two eigenpolarisations grows linearly with distance travelled.
-    dx = 0.5 if quick else 0.26
-    xlim = (-45.0, 45.0)
-    zlim = (-8.0, 150.0) if quick else (-8.0, 800.0)
-    # Long enough for the deepest layer's echo to come back, not just for the
-    # downgoing wave to cross the model: the received-waveform figure needs the
-    # reflections.  The movie only uses the first part, while the wave is on its
-    # way down.
-    t_end = 2.2e-6 if quick else 8.6e-6
+    dx, xlim, zlim, t_end = fdtd_geometry(quick)
 
     column = make_column(kind)
     grid = PropertyGrid.uniform(xlim, zlim, dx)
@@ -142,12 +181,12 @@ def run_fdtd(quick, kind="ridge"):
     # being measured, so every predicted arrival below carries it.
     t_wave = envelope_peak_time(pulse, t)
 
-    z_src = 3.0
+    z_src = Z_SRC
     src = np.array([[0.0, z_src]])
     # Receiver 0 sits back at the source: that is the monostatic trace, the
     # thing an actual sounder measures.  The rest are strung down the nadir
     # axis to give the one-way delay directly.
-    rec_z = np.arange(40.0, zlim[1] - 25.0, 20.0)
+    rec_z = np.arange(REC_TOP, zlim[1] - REC_MARGIN, REC_STEP)
     rec = np.vstack([[0.0, z_src], np.column_stack([np.zeros_like(rec_z), rec_z])])
     snap_every = max(1, len(t) // 240)
 
@@ -384,9 +423,10 @@ def main(quick=False, render_only=False, bare=False):
     import matplotlib.pyplot as plt
 
     column = IceColumn(**RIDGE_A)
+    stamp = cache_stamp(quick)
 
     if render_only and cache.exists():
-        panels, sx, sz, stimes, extra = load_snapshots(cache)
+        panels, sx, sz, stimes, extra = load_snapshots(cache, stamp=stamp)
         fpeak = float(extra["fpeak"])
         t_wave = float(extra["t_wave"])
         measured = {
@@ -449,7 +489,7 @@ def main(quick=False, render_only=False, bare=False):
                 stimes = par.snapshot_times
 
         save_snapshots(
-            cache, panels, sx, sz, stimes, fpeak=fpeak, t_wave=t_wave,
+            cache, panels, sx, sz, stimes, stamp=stamp, fpeak=fpeak, t_wave=t_wave,
             **{f"{n}_{k}": v for k in ("ridge", "strong")
                for n, v in zip(("rec_z", "lag", "z_src", "amp_db"), measured[k])},
             **{f"surf_{k}_{w}": surface[k][w] for k in ("ridge", "strong")
@@ -667,4 +707,7 @@ if __name__ == "__main__":
     p.add_argument("--bare", action="store_true",
                    help="strip titles, notes, annotations and legends for slides")
     a = p.parse_args()
-    main(quick=a.quick, render_only=a.render_only, bare=a.bare)
+    try:
+        main(quick=a.quick, render_only=a.render_only, bare=a.bare)
+    except StaleCache as exc:
+        raise SystemExit(str(exc))

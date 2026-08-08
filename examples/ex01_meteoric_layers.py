@@ -288,7 +288,18 @@ def main(quick=False, radargram=False, processes=None, bare=False):
     if radargram:
         # Wider trace spacing than you would use in the field: at this depth a
         # single shot is ~1.5e10 node-updates, so the section is the expensive
-        # part of the example by a wide margin.
+        # part of the example by a wide margin.  Budget hours, not minutes: the
+        # wider domain costs ~1.7x the cells per shot *and* spans 23 shots at
+        # this spacing rather than the 13 the old +/-105 m domain did, so the
+        # section is about 3x what it was.  A full run measured ~2.4 hours at
+        # --processes 10.
+        #
+        # The span and the spacing are deliberate: the point of the wider domain
+        # is that the movie shows the whole wavefront, and narrowing the section
+        # back would quietly undo that.  The cheap win is not to repeat the
+        # shots -- the section is written to radargram.npz below, so retuning
+        # only the figure wants a --render-only path that reads that back, the
+        # way examples 2 and 3 do for their snapshots.  There is not one yet.
         step = 4.0 if quick else 14.0
         xs = np.arange(xlim[0] + 20, xlim[1] - 20 + 1e-9, step)
         shots = np.column_stack([xs, np.full_like(xs, Z_ANT)])

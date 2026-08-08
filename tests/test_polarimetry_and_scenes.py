@@ -339,6 +339,21 @@ def test_conformal_layering_accepts_several_excluded_bands():
     assert len(layers) > 3
 
 
+@pytest.mark.parametrize("empty", [[], (), np.empty((0, 2))])
+def test_conformal_layering_excludes_nothing_for_an_empty_band_list(empty):
+    """No bands is not an error: it is the same as not asking for any.
+
+    A caller that builds its bands programmatically naturally ends up with an
+    empty list, and a single band given as an array has to keep working.
+    """
+    reference = conformal_layering(300.0, seed=5)
+    assert [lay.depth for lay in conformal_layering(300.0, seed=5, exclude=empty)] == [
+        lay.depth for lay in reference
+    ]
+    one = conformal_layering(300.0, seed=5, exclude=np.array([125.0, 155.0]))
+    assert not [lay.depth for lay in one if 125.0 <= lay.depth <= 155.0]
+
+
 def test_strip_text_clears_titles_annotations_and_insets():
     """--bare has to reach inset axes, which are not in ``fig.axes``.
 
@@ -366,8 +381,13 @@ def test_strip_text_clears_titles_annotations_and_insets():
     ax.legend()
     inset = ax.inset_axes([0.5, 0.5, 0.4, 0.4])
     inset.set_title("inset title")
+    # A figure-level legend is not on any axes, so the per-axes sweep never sees
+    # it and it would otherwise survive --bare with its labels intact.
+    fig.legend(loc="lower right")
 
     strip_text(fig)
+
+    assert list(fig.legends) == []
 
     # The suptitle stays attached but blank: removing it leaves ``fig._suptitle``
     # dangling and the next tight_layout dies measuring it.  Every other
@@ -383,3 +403,64 @@ def test_strip_text_clears_titles_annotations_and_insets():
     assert ax.get_ylabel() == "depth (m)"
     assert cb.ax.get_ylabel() == "colourbar label"
     plt.close(fig)
+
+
+def _common():
+    """The examples' shared helpers, which are a script directory, not a package."""
+    import sys
+    from pathlib import Path
+
+    path = str(Path(__file__).resolve().parents[1] / "examples")
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    import _common
+
+    return _common
+
+
+def test_snapshot_cache_roundtrips_with_a_matching_stamp(tmp_path):
+    mod = _common()
+    stamp = {"dx": 0.32, "xlim": (-110.0, 110.0), "fabric": {"lam_z": 0.8}}
+    cache = mod.save_snapshots(
+        tmp_path / "snapshots.npz", [(np.ones((2, 3, 4)), "E along 89 deg")],
+        np.arange(3.0), np.arange(4.0), np.arange(2.0), stamp=stamp, trace=np.zeros(5),
+    )
+    panels, x, z, times, extra = mod.load_snapshots(cache, stamp=stamp)
+    assert [lbl for _, lbl in panels] == ["E along 89 deg"]
+    assert panels[0][0].shape == (2, 3, 4)
+    # The stamp must not leak into the payload the caller unpacks.
+    assert sorted(extra) == ["trace"]
+    assert x.size == 3 and z.size == 4 and times.size == 2
+
+
+def test_snapshot_cache_refuses_a_stamp_that_does_not_match(tmp_path):
+    """A model change has to fail the reload, not be rendered under new numbers.
+
+    Re-rendering a stale cache draws the old wavefield and the old trace beside
+    predictions computed from the current constants, and nothing in the figure
+    says so -- which is exactly the failure this guards.
+    """
+    mod = _common()
+    args = ([(np.ones((2, 3, 4)), "panel")], np.arange(3.0), np.arange(4.0),
+            np.arange(2.0))
+    cache = mod.save_snapshots(tmp_path / "snapshots.npz", *args,
+                               stamp={"transition_width": 0.6, "dip_deg": 35.0})
+
+    with pytest.raises(mod.StaleCache) as exc:
+        mod.load_snapshots(cache, stamp={"transition_width": 1.2, "dip_deg": 35.0})
+    # The message has to name the parameter that moved, and only that one.
+    assert "transition_width" in str(exc.value)
+    assert "dip_deg" not in str(exc.value)
+    assert "--render-only" in str(exc.value)
+
+    # A parameter that did not exist when the cache was written also counts.
+    with pytest.raises(mod.StaleCache, match="layer_exclusion_band"):
+        mod.load_snapshots(cache, stamp={"transition_width": 0.6, "dip_deg": 35.0,
+                                         "layer_exclusion_band": (100.0, 130.0)})
+
+    # A cache from before stamping existed cannot be trusted either.
+    unstamped = mod.save_snapshots(tmp_path / "old.npz", *args)
+    with pytest.raises(mod.StaleCache, match="no model stamp"):
+        mod.load_snapshots(unstamped, stamp={"transition_width": 1.2})
+    # ...but an unstamped cache still loads when no stamp is asked for.
+    assert mod.load_snapshots(unstamped)[0][0][1] == "panel"

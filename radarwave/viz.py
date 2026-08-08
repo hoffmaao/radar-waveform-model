@@ -126,6 +126,11 @@ def strip_text(fig, *, keep_colorbars=True):
             txt.remove()
     if sup is not None:
         sup.set_text("")
+    # Figure-level legends live on the figure, not on any axes, so the per-axes
+    # loop below never sees them and one would otherwise survive with all its
+    # label text intact.
+    for legend in list(fig.legends):
+        legend.remove()
     for ax in _all_axes(fig):
         if keep_colorbars and _is_colorbar(ax):
             continue
@@ -444,10 +449,10 @@ def wavefield_movie(
         # Wrap onto two lines below a narrow panel: on one line this label is
         # wider than its own column once ``trace_width`` drops much under 0.7,
         # and it runs off the canvas rather than shrinking the axes.
-        wrapped = trace_width < 0.62
+        wrap_trace_label = trace_width < 0.62
         trace_ax.set_xlabel(trace.get(
             "xlabel",
-            ("returned power\n(dB re. transmit pulse)" if wrapped
+            ("returned power\n(dB re. transmit pulse)" if wrap_trace_label
              else "returned power (dB re. transmit pulse)") if trace.get("db", True)
             else "amplitude",
         ))

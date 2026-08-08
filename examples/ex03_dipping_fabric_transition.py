@@ -28,7 +28,10 @@ The scene also carries ordinary conformable meteoric layering, so the fabric
 transition appears as a discordant feature cutting across a conformable
 background, which is what the radargram looks like.
 
-The reflection is only about -60 dB, so each polarisation is run twice -- with
+The reflection is faint: about -54 dB at normal incidence for the bright
+eigenpolarisation, and the 1.2 m blend across the transition costs a further
+25.5 dB (see ``TRANSITION_WIDTH``), so roughly -80 dB before any spreading or
+absorption.  Each polarisation is therefore run twice -- with
 and without the fabric contrast -- and the difference isolates it.  That also
 cancels any residual boundary artefact, which matters at this amplitude.  The
 cancellation is exact only until the transmitted wave starts returning from
@@ -37,7 +40,8 @@ velocities down there, so those layers arrive at different times and do not
 subtract out.  Everything before ~1.6 us is clean, which covers the specular
 arrival; the movie's trace panel shows the raw recorded trace anyway.
 
-Outputs land in ``figures/ex03/``.  ``--render-only`` re-renders from cache.
+Outputs land in ``figures/ex03/``.  ``--render-only`` re-renders from cache, and
+refuses a cache that was written from a different model.
 """
 
 import argparse
@@ -48,7 +52,13 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import echo_time, load_snapshots, save_figure, save_snapshots
+from _common import (
+    StaleCache,
+    echo_time,
+    load_snapshots,
+    save_figure,
+    save_snapshots,
+)
 
 from radarwave import (
     C0,
@@ -133,10 +143,8 @@ def build_models(xlim, zlim, dx):
     t_event = column.two_way_time(pz, z0=Z_ANT) / np.cos(np.deg2rad(DIP_DEG))
     probe = np.linspace(0.0, zlim[1], 4001)
     d_event = float(np.interp(t_event, column.two_way_time(probe, z0=Z_ANT), probe))
-    layers = conformal_layering(
-        zlim[1],
-        exclude=(d_event - LAYER_GAP_HALFWIDTH, d_event + LAYER_GAP_HALFWIDTH),
-    )
+    exclude = (d_event - LAYER_GAP_HALFWIDTH, d_event + LAYER_GAP_HALFWIDTH)
+    layers = conformal_layering(zlim[1], exclude=exclude)
 
     with_fabric = IceModelBuilder(grid, column, surface=0.0, air=True)
     with_fabric.add_layers(layers)
@@ -172,7 +180,7 @@ def build_models(xlim, zlim, dx):
     without.add_layers(layers)
 
     return (column, grid, with_fabric.finalize(npml=NPML),
-            without.finalize(npml=NPML), boundary, layers)
+            without.finalize(npml=NPML), boundary, layers, exclude)
 
 
 def specular_geometry(x_antenna=0.0):
@@ -209,7 +217,26 @@ def main(quick=False, render_only=False, radargram=False, processes=None, bare=F
     zlim = (-8.0, 300.0) if not quick else (-8.0, 260.0)
     t_end = 1.95e-6
 
-    column, grid, model, twin, boundary, layers = build_models(xlim, zlim, dx)
+    column, grid, model, twin, boundary, layers, exclude = build_models(xlim, zlim, dx)
+    # Everything the cached wavefield and traces depend on.  A cache written
+    # from a different model must not be re-rendered: its measured numbers would
+    # be printed beside predictions computed from the constants above.
+    stamp = {
+        "dx": dx,
+        "xlim": xlim,
+        "zlim": zlim,
+        "t_end": t_end,
+        "fc": FC,
+        "npml": NPML,
+        "z_ant": Z_ANT,
+        "dip_deg": DIP_DEG,
+        "depth_at_x0": DEPTH_AT_X0,
+        "transition_width": TRANSITION_WIDTH,
+        "layer_gap_halfwidth": LAYER_GAP_HALFWIDTH,
+        "layer_exclusion_band": exclude,
+        "fabric_above": ABOVE,
+        "fabric_below": BELOW,
+    }
     dt = 0.9 * max_time_step(model.eps_min, model.mu_min, model.dx, model.dz)
     t = np.arange(0.0, t_end, dt)
     pulse = blackharrispulse(FC, t)
@@ -235,7 +262,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None, bare=F
           f"179 deg pol {20 * np.log10(r_par):.1f} dB")
 
     if render_only and cache.exists():
-        panels, sx, sz, stimes, extra = load_snapshots(cache)
+        panels, sx, sz, stimes, extra = load_snapshots(cache, stamp=stamp)
         t_rec, tr_par, tr_perp = extra["t_rec"], extra["tr_par"], extra["tr_perp"]
         rec_par, rec_perp = extra["rec_par"], extra["rec_perp"]
     else:
@@ -273,7 +300,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None, bare=F
 
         # The movie shows one wavefield panel -- the wave as it actually
         # propagates, in the bright polarisation -- beside the trace the
-        # antenna records.  The transition's own return is ~60 dB down and
+        # antenna records.  The transition's own return is ~80 dB down and
         # cannot be seen beside the incident wave at all, which is exactly why
         # the real feature is faint in the radargram; it is isolated instead by
         # subtracting the transition-free twin, and that difference is what the
@@ -297,7 +324,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None, bare=F
         t_rec = shown.t
         tr_par, tr_perp = traces[bright], traces[dim]
         rec_par, rec_perp = recorded[bright], recorded[dim]
-        save_snapshots(cache, panels, sx, sz, stimes,
+        save_snapshots(cache, panels, sx, sz, stimes, stamp=stamp,
                        t_rec=t_rec, tr_par=tr_par, tr_perp=tr_perp,
                        rec_par=rec_par, rec_perp=rec_perp)
 
@@ -526,5 +553,8 @@ if __name__ == "__main__":
     p.add_argument("--bare", action="store_true",
                    help="strip titles, notes, annotations and legends for slides")
     a = p.parse_args()
-    main(quick=a.quick, render_only=a.render_only, radargram=a.radargram, bare=a.bare,
-         processes=a.processes)
+    try:
+        main(quick=a.quick, render_only=a.render_only, radargram=a.radargram,
+             bare=a.bare, processes=a.processes)
+    except StaleCache as exc:
+        raise SystemExit(str(exc))

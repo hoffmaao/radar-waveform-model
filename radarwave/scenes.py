@@ -75,13 +75,17 @@ def conformal_layering(
         at the same time.  Clearing a band a few wavelengths wide leaves the
         event alone in the record.  The band is applied to the layer's nominal
         depth; the undulations then carry it a few metres either side, which is
-        why the band wants to be wider than the wavelet.
+        why the band wants to be wider than the wavelet.  ``None`` or an empty
+        sequence leaves every layer in place.
 
     Returns
     -------
     list of Layer
     """
-    if exclude is None:
+    # ``len`` rather than plain falsiness: an empty list is the natural value for
+    # a caller that builds its bands programmatically, and a two-element array is
+    # a perfectly good single band that ``not`` cannot be asked about.
+    if exclude is None or len(exclude) == 0:
         bands = []
     else:
         bands = [exclude] if np.ndim(exclude[0]) == 0 else list(exclude)
