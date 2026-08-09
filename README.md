@@ -22,7 +22,7 @@ into `figures/`.
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest                       # ~72 tests, a few minutes
+pytest                       # 80 tests, a few minutes
 ```
 
 ## The three examples
@@ -34,8 +34,22 @@ python examples/ex03_dipping_fabric_transition.py --radargram --processes 10
 ```
 
 Add `--quick` to any of them for a small, fast version while iterating on the
-model, and `--render-only` (examples 2 and 3) to re-render the movie from cached
-snapshots without repeating the simulation.
+model, `--bare` to strip titles, figure notes, in-plot annotations and legends
+for slides - axis lines, ticks, tick numbers, axis labels and colourbars stay -
+and `--render-only` (examples 2 and 3) to re-render the movie from cached
+snapshots without repeating the simulation. Each cache carries a stamp of the
+parameters that define its model, and `--render-only` refuses one that does not
+match - otherwise changing a model constant renders the old wavefield and the
+old trace underneath predictions computed from the new constant. `--out DIR`
+sends every figure and cache under `DIR` instead of `figures/exNN`, which is
+what keeps parameter sweeps and cluster array jobs from clobbering each other -
+`cluster/README.md` has the sweep pattern and Slurm templates.
+
+`--radargram` is the expensive part of examples 1 and 3 by a wide margin. For
+example 1 the wider domain costs ~1.7x the cells per shot and spans 23 shots
+rather than the 13 the old +/-105 m domain did, so the section is about 3x what
+it used to be: a full run measured about **2.4 hours** at `--processes 10`. The
+movie and the still figures on their own are minutes.
 
 ### 1. Meteoric layering
 
@@ -110,20 +124,31 @@ The figure carries the quantitative chain for Ridge A:
 3. a synthetic interferogram for the full 1850 m column at 195 MHz,
 4. the fringes inverted back to `dlam` and compared with the input.
 
-`received.png` carries the four monostatic traces - two fabrics by two
-eigenpolarisations - as returned power in dB on one shared reference, each with
-an inset magnifying the deepest layer return in a common time window. Every
-marked arrival is timed from the antenna, which is 3 m down in the firn, and
-carries the wavelet's own offset, so the marks land on the peaks rather than
-~16 ns off them. It separates the two things the fabric could do to a
-measurement:
+`received.png` carries eight monostatic traces in two rows, as returned power in
+dB on one shared reference, each with an inset magnifying the deepest layer
+return in a common time window. The top row is the two fabrics by the two
+**eigenpolarisations**; the bottom row is the same two fabrics for a **45 degree
+launch**, co-pol and cross-pol, which is what a real survey usually transmits. A
+45 degree launch is not an eigenmode - it is the two eigenmodes at equal
+amplitude - so no new simulation is needed: with the eigenaxes fixed in depth,
+as they are here, the two modes propagate independently and the superposition is
+exact. Every marked arrival is timed from the antenna, which is 3 m down in the
+firn, and carries the wavelet's own offset, so the marks land on the peaks rather
+than ~16 ns off them. The figure separates the two things the fabric could do to
+a measurement:
 
 * **speed**: in the strong fabric the 700 m return arrives about **42 ns** later
   on the slow axis than the fast one, against 39.7 ns from the traveltime model;
   in Ridge A's the same return is a couple of ns late.
-* **amplitude**: nothing resolvable. Both eigenpolarisations see the same
-  isotropic reflectors and the same conductivity, and the figure prints the
-  measured difference between them at the deepest nadir receiver.
+* **amplitude**: it depends entirely on how the antenna is oriented. Along the
+  eigenpolarisations there is nothing resolvable - the layers are isotropic, so
+  both modes see the same reflector, the conductivity is scalar so neither is
+  absorbed preferentially, and the figure prints the measured difference at the
+  deepest nadir receiver. Off the eigenaxes the signature appears: at 45 degrees
+  the two modes recombine at the receiver with whatever differential phase they
+  have accumulated, so co-pol adds them and cross-pol differences them and both
+  beat through a null every half cycle of that phase. The bottom row is the same
+  delay showing up as amplitude.
 
 The delay is read off the reflection only after the window is detrended and
 tapered (`radarwave.polarimetry.isolate_arrival`). These echoes stand about
@@ -131,10 +156,13 @@ tapered (`radarwave.polarimetry.isolate_arrival`). These echoes stand about
 cycles wide the wake still holds most of the energy - and it has travelled
 nowhere, so correlating the raw window reports a 42 ns split as 3 ns.
 
-So birefringence is a traveltime effect, not an amplitude one, as long as the
-reflectors themselves are isotropic (these are acidity layers, which both
-polarisations see identically). Amplitude only becomes polarisation-dependent
-when the reflector *is* a fabric contrast, which is example 3.
+So birefringence is a traveltime effect at heart: with isotropic reflectors
+(these are acidity layers, which both polarisations see identically) neither
+eigenpolarisation comes back stronger than the other. It nonetheless reaches the
+amplitude of a real measurement by two routes. Off the eigenaxes it does so
+through the modes recombining, which is the bottom row above and what
+polarimetric sounding lives on. And the reflector itself becomes
+polarisation-dependent when it *is* a fabric contrast, which is example 3.
 
 Step 3 is not FDTD. Ridge A is ~1850 m thick and MCoRDS runs near 195 MHz, so
 the column is roughly 4000 wavelengths deep - a 2-D grid that size is out of
@@ -147,8 +175,12 @@ against the observed interferogram.
 
 ### 3. Dipping fabric transition
 
-A sharp fabric change across a plane dipping at 35 degrees, 175 m below the
-surface. Two consequences, and they are the point of the example:
+A strong fabric change across a plane dipping at 35 degrees, 175 m below the
+surface, blended over 1.2 m rather than stepped - real fabric evolves with
+strain, and the blending is priced: it costs the return about 25.5 dB against
+the step-interface numbers quoted below (`TRANSITION_WIDTH` in the example
+carries the cost curve). Two consequences, and they are the point of the
+example:
 
 **The energy that returns is not from beneath the antenna.** A monostatic
 antenna records a specular return only from where the interface normal points
@@ -186,7 +218,10 @@ the bright axis from the permittivities rather than assuming it.
 The scene also carries ordinary conformable meteoric layering - all the layers
 share one undulation shape with the amplitude growing downwards - so the fabric
 transition reads as a discordant feature cutting across a conformable
-background, which is what the radargram looks like.
+background, which is what the radargram looks like. One gap in that background
+is deliberate: a 30 m band of layers around the depth whose two-way time
+matches the transition's arrival is left clear, so the faint fabric echo stands
+alone in its window instead of under a layer wavelet.
 
 The movie has the wave propagating on the left and, on the right, the trace the
 surface receiver is building up: returned power in dB across, two-way time down,
@@ -278,7 +313,9 @@ from. Beyond that:
   -45 dB at `npml = 10` and -51 dB at `npml = 20`, and it scales with thickness
   again. The original MATLAB-derived solver reproduces the -23.5 dB figure
   exactly, so this was inherited rather than introduced. It matters because the
-  fabric reflections in example 3 sit near -60 dB.
+  fabric reflection in example 3 is near -80 dB: -54 dB at normal incidence for
+  the bright eigenpolarisation, less the 25.5 dB its 1.2 m gradational transition
+  costs.
 * Update coefficients are pre-sampled onto each field component's own grid, so
   the time loop is slice arithmetic rather than `np.ix_` fancy indexing - about
   an order of magnitude faster, with no per-step allocation.
@@ -306,7 +343,21 @@ from. Beyond that:
 * that TM responds to `eps_yy` and is blind to `eps_xx`, and vice versa;
 * boundary reflection below -40 dB, and that it improves with layer thickness;
 * the full polarimetric chain: synthesise fringes from a fabric profile, process
-  them, and recover the profile.
+  them, and recover the profile;
+* that `--bare` reaches inset axes and figure-level legends while leaving the
+  axis labels, tick numbers and colourbar text a slide still needs;
+* that a snapshot cache written from one model is refused by another, naming the
+  parameter that moved.
+
+Beyond the test suite, `validation/` holds cross-code checks against tools the
+package deliberately does not depend on: `thin_layer_check.py` scores the
+solver against the exact transfer-matrix response of a thin layer, the
+`*gprmax*` scripts run the same models through a local gprMax build (its
+python and repo paths are passed on the command line; gprMax is never
+imported), and `emmodel_export.py` / `emmodel_driver.m` bridge to the
+CReSIS/OPR `em_model` MATLAB library, whose driver runs wherever that toolbox
+lives. Each script's docstring states what it validates and what it cannot;
+their figures land in `figures/validation/`.
 
 ## References
 

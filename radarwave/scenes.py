@@ -44,6 +44,7 @@ def conformal_layering(
     thickness_ice=(0.8, 1.4),
     amplitude=(1.4, 4.0),
     wavelengths=(300.0, 95.0),
+    exclude=None,
 ):
     """Meteoric internal layering that is conformable with the surface.
 
@@ -67,11 +68,28 @@ def conformal_layering(
         seed gives the same stratigraphy, so two models can share it.
     amplitude : (float, float)
         Undulation amplitude at the surface, and its increase per 250 m.
+    exclude : (float, float) or sequence of them, optional
+        Depth bands to leave clear of layers.  A layer whose two-way time
+        coincides with the event an example is about puts its own wavelet on
+        top of that event, and no amount of processing separates two arrivals
+        at the same time.  Clearing a band a few wavelengths wide leaves the
+        event alone in the record.  The band is applied to the layer's nominal
+        depth; the undulations then carry it a few metres either side, which is
+        why the band wants to be wider than the wavelet.  ``None`` or an empty
+        sequence leaves every layer in place.
 
     Returns
     -------
     list of Layer
     """
+    # ``len`` rather than plain falsiness: an empty list is the natural value for
+    # a caller that builds its bands programmatically, and a two-element array is
+    # a perfectly good single band that ``not`` cannot be asked about.
+    if exclude is None or len(exclude) == 0:
+        bands = []
+    else:
+        bands = [exclude] if np.ndim(exclude[0]) == 0 else list(exclude)
+    bands = [(float(min(a, b)), float(max(a, b))) for a, b in bands]
     rng = np.random.default_rng(seed)
     phase_long, phase_short = rng.uniform(0, 2 * np.pi, size=2)
     a0, a_grad = amplitude
@@ -81,17 +99,24 @@ def conformal_layering(
     while depth < max_depth - 18.0:
         amp = a0 + a_grad * depth / 250.0
         undul = [(amp, wl_long, phase_long), (0.3 * amp, wl_short, phase_short)]
+        # Draw before deciding whether to keep the layer, so excluding a band
+        # does not shift the random stream and change the stratigraphy either
+        # side of it.  Two models with the same seed then differ only in the
+        # band, which is what makes them comparable.
         if depth < firn_base:
-            layers.append(Layer(
+            layer = Layer(
                 depth=depth, thickness=rng.uniform(*thickness_firn),
                 d_rho=rng.choice([-1.0, 1.0]) * rng.uniform(*d_rho),
-                undulations=undul))
-            depth += rng.uniform(*firn_spacing)
+                undulations=undul)
+            step = rng.uniform(*firn_spacing)
         else:
-            layers.append(Layer(
+            layer = Layer(
                 depth=depth, thickness=rng.uniform(*thickness_ice),
-                sigma_factor=rng.uniform(*sigma_factor), undulations=undul))
-            depth += rng.uniform(*ice_spacing)
+                sigma_factor=rng.uniform(*sigma_factor), undulations=undul)
+            step = rng.uniform(*ice_spacing)
+        if not any(lo <= depth <= hi for lo, hi in bands):
+            layers.append(layer)
+        depth += step
     return layers
 
 

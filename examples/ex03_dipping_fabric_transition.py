@@ -3,8 +3,8 @@
 The Ridge A radargram shows a faint, steeply dipping feature at 1000-1500 m
 labelled "Deep Fabric Fold?".  This example models what produces it.
 
-The scene is a sharp change in crystal-orientation fabric across a plane
-dipping at 35 degrees.  Two things follow from that geometry, and both are the
+The scene is a strong change in crystal-orientation fabric across a plane
+dipping at 35 degrees, blended over ``TRANSITION_WIDTH`` rather than stepped.  Two things follow from that geometry, and both are the
 point of the example:
 
 1. **The energy that comes back to the antenna is not from beneath it.**  A
@@ -28,7 +28,10 @@ The scene also carries ordinary conformable meteoric layering, so the fabric
 transition appears as a discordant feature cutting across a conformable
 background, which is what the radargram looks like.
 
-The reflection is only about -60 dB, so each polarisation is run twice -- with
+The reflection is faint: about -54 dB at normal incidence for the bright
+eigenpolarisation, and the 1.2 m blend across the transition costs a further
+25.5 dB (see ``TRANSITION_WIDTH``), so roughly -80 dB before any spreading or
+absorption.  Each polarisation is therefore run twice -- with
 and without the fabric contrast -- and the difference isolates it.  That also
 cancels any residual boundary artefact, which matters at this amplitude.  The
 cancellation is exact only until the transmitted wave starts returning from
@@ -37,7 +40,8 @@ velocities down there, so those layers arrive at different times and do not
 subtract out.  Everything before ~1.6 us is clean, which covers the specular
 arrival; the movie's trace panel shows the raw recorded trace anyway.
 
-Outputs land in ``figures/ex03/``.  ``--render-only`` re-renders from cache.
+Outputs land in ``figures/ex03/``.  ``--render-only`` re-renders from cache, and
+refuses a cache that was written from a different model.
 """
 
 import argparse
@@ -48,7 +52,14 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import echo_time, load_snapshots, save_snapshots
+from _common import (
+    StaleCache,
+    echo_time,
+    load_snapshots,
+    save_figure,
+    save_snapshots,
+    stampable,
+)
 
 from radarwave import (
     C0,
@@ -77,6 +88,21 @@ Z_ANT = -1.0  # antenna 1 m above the snow surface
 DIP_DEG = 35.0  # dip of the fabric transition
 DEPTH_AT_X0 = 175.0  # depth of the transition below the surface at the antenna
 
+# Width of the blend across the transition, and what it costs.  A fabric
+# interface is a gradational thing in real ice -- fabric evolves with strain,
+# not in a step -- and the reflectivity is acutely sensitive to how gradational:
+# filtering the pulse through the interface gives -6.5 dB at 0.3 m, -14.5 dB at
+# 0.6 m, -25.5 dB at 1.2 m and -40 dB at 2.5 m, against a sharp step.  Roughly
+# 10-15 dB per doubling, so this constant is not cosmetic.  1.2 m is a little
+# under half a wavelength at 60 MHz: clearly gradational, still measurable.
+TRANSITION_WIDTH = 1.2
+
+# Layers whose two-way time coincides with the transition's would land their own
+# wavelet on top of it, and nothing downstream can separate two arrivals at the
+# same time.  This clears a band around the equivalent nadir depth; it has to
+# exceed the wavelet length plus the layer undulation amplitude (~4 m here).
+LAYER_GAP_HALFWIDTH = 15.0
+
 # Fabric either side of the transition: a vertical single maximum over a
 # horizontal one aligned with x.  Chosen so that lam_y barely changes across the
 # boundary while lam_x jumps by 0.75, which makes the interface bright to one
@@ -88,6 +114,19 @@ DEPTH_AT_X0 = 175.0  # depth of the transition below the surface at the antenna
 # the example works it out from the permittivities rather than assuming.
 ABOVE = dict(lam_z=0.80, dlambda=0.03)   # lam = (0.115, 0.085, 0.80)
 BELOW = dict(lam_z=0.08, dlambda=0.80)   # lam = (0.860, 0.060, 0.08)
+
+# The background column as its constructor arguments, kept as a mapping rather
+# than written out at the call site so the cache stamp is taken from the same
+# values the column is built from and a parameter added later cannot escape it.
+# The ``dlambda`` callable closes over ABOVE, which is stamped in its own right.
+COLUMN = dict(
+    thickness=1850.0,
+    depth_bco=90.0,
+    sigma_ice=1.2e-5,
+    lam_z_sfc=ABOVE["lam_z"],
+    lam_z_bed=ABOVE["lam_z"],
+    dlambda=lambda d: np.full_like(np.asarray(d, float), ABOVE["dlambda"]),
+)
 
 
 def eigen_permittivity(lam_z, dlambda):
@@ -101,27 +140,38 @@ def eigen_permittivity(lam_z, dlambda):
 
 def build_models(xlim, zlim, dx):
     """Return the model with the fabric transition and its contrast-free twin."""
-    column = IceColumn(thickness=1850.0, depth_bco=90.0, sigma_ice=1.2e-5,
-                       lam_z_sfc=ABOVE["lam_z"], lam_z_bed=ABOVE["lam_z"],
-                       dlambda=lambda d: np.full_like(np.asarray(d, float), ABOVE["dlambda"]))
+    column = IceColumn(**COLUMN)
     grid = PropertyGrid.uniform(xlim, zlim, dx)
 
     def boundary(x):
         return dipping_depth(x, DEPTH_AT_X0, DIP_DEG)
 
-    layers = conformal_layering(zlim[1])
+    # Which nadir depth would a layer have to sit at to arrive when the
+    # transition does?  Not the transition's own depth: the specular ray leaves
+    # at the dip angle, so it images at its perpendicular range.  Invert the
+    # column's own two-way time rather than dividing by a nominal velocity, so
+    # the firn is accounted for.
+    _, _, pz = specular_geometry(0.0)
+    t_event = column.two_way_time(pz, z0=Z_ANT) / np.cos(np.deg2rad(DIP_DEG))
+    probe = np.linspace(0.0, zlim[1], 4001)
+    # Rounded to the millimetre: the band is 30 m wide, so nothing in the model
+    # can tell the difference, and it keeps a numpy release whose interpolation
+    # differs in the last digits from rejecting a cache as stale.
+    d_event = round(float(np.interp(t_event, column.two_way_time(probe, z0=Z_ANT), probe)), 3)
+    exclude = (d_event - LAYER_GAP_HALFWIDTH, d_event + LAYER_GAP_HALFWIDTH)
+    layers = conformal_layering(zlim[1], exclude=exclude)
 
     with_fabric = IceModelBuilder(grid, column, surface=0.0, air=True)
     with_fabric.add_layers(layers)
 
     # Blend across the transition rather than stepping across it.  A hard step
     # on a rectangular grid turns a 35 degree plane into a staircase, which
-    # scatters more strongly than the fabric contrast itself.  The blend has to
-    # stay well inside a wavelength though: smoothing over ~4 m (more than a
-    # wavelength at 60 MHz) makes the transition gradational and drops its
-    # reflectivity by tens of dB, which would hide the very return this example
-    # is about.  0.6 m is a few grid cells and about a fifth of a wavelength.
-    edge = np.tanh((with_fabric.depth - boundary(grid.x)[:, None]) / 0.6)
+    # scatters more strongly than the fabric contrast itself.  The blend is not
+    # free: see TRANSITION_WIDTH for what each width costs.  It is a physical
+    # parameter of the model, not a numerical detail -- how sharp a fabric
+    # transition has to be before a radar can see it is the question this
+    # example is really asking.
+    edge = np.tanh((with_fabric.depth - boundary(grid.x)[:, None]) / TRANSITION_WIDTH)
     frac = 0.5 * (1.0 + edge)
 
     # Taper the contrast away near the side boundaries so the transition ends
@@ -145,7 +195,7 @@ def build_models(xlim, zlim, dx):
     without.add_layers(layers)
 
     return (column, grid, with_fabric.finalize(npml=NPML),
-            without.finalize(npml=NPML), boundary, layers)
+            without.finalize(npml=NPML), boundary, layers, exclude)
 
 
 def specular_geometry(x_antenna=0.0):
@@ -171,7 +221,15 @@ def specular_geometry(x_antenna=0.0):
     return slant_range, px, pz
 
 
-def main(quick=False, render_only=False, radargram=False, processes=None):
+def main(quick=False, render_only=False, radargram=False, processes=None, bare=False,
+         out=None):
+    # An output override is what lets many runs share a machine: without it,
+    # every invocation writes the same figures/exNN paths and a parameter sweep
+    # destroys its own results.  The cache guard catches the mixing after the
+    # fact; this prevents it.
+    if out is not None:
+        global OUT
+        OUT = Path(out)
     use_talk_style()
     OUT.mkdir(parents=True, exist_ok=True)
     cache = OUT / "snapshots.npz"
@@ -182,7 +240,31 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
     zlim = (-8.0, 300.0) if not quick else (-8.0, 260.0)
     t_end = 1.95e-6
 
-    column, grid, model, twin, boundary, layers = build_models(xlim, zlim, dx)
+    column, grid, model, twin, boundary, layers, exclude = build_models(xlim, zlim, dx)
+    # Everything the cached wavefield and traces depend on.  A cache written
+    # from a different model must not be re-rendered: its measured numbers would
+    # be printed beside predictions computed from the constants above.  The
+    # column goes in as the mapping it is built from, so a parameter of it that
+    # never reaches the derived band -- sigma_ice, which sets the recorded
+    # amplitudes but not any traveltime -- is still caught, and is named as
+    # itself rather than as the band having moved.
+    stamp = {
+        "dx": dx,
+        "xlim": xlim,
+        "zlim": zlim,
+        "t_end": t_end,
+        "fc": FC,
+        "npml": NPML,
+        "z_ant": Z_ANT,
+        "dip_deg": DIP_DEG,
+        "depth_at_x0": DEPTH_AT_X0,
+        "transition_width": TRANSITION_WIDTH,
+        "layer_gap_halfwidth": LAYER_GAP_HALFWIDTH,
+        "layer_exclusion_band": exclude,
+        "fabric_above": ABOVE,
+        "fabric_below": BELOW,
+        "column": stampable(COLUMN),
+    }
     dt = 0.9 * max_time_step(model.eps_min, model.mu_min, model.dx, model.dz)
     t = np.arange(0.0, t_end, dt)
     pulse = blackharrispulse(FC, t)
@@ -208,7 +290,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
           f"179 deg pol {20 * np.log10(r_par):.1f} dB")
 
     if render_only and cache.exists():
-        panels, sx, sz, stimes, extra = load_snapshots(cache)
+        panels, sx, sz, stimes, extra = load_snapshots(cache, stamp=stamp)
         t_rec, tr_par, tr_perp = extra["t_rec"], extra["tr_par"], extra["tr_perp"]
         rec_par, rec_perp = extra["rec_par"], extra["rec_perp"]
     else:
@@ -246,7 +328,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
 
         # The movie shows one wavefield panel -- the wave as it actually
         # propagates, in the bright polarisation -- beside the trace the
-        # antenna records.  The transition's own return is ~60 dB down and
+        # antenna records.  The transition's own return is ~80 dB down and
         # cannot be seen beside the incident wave at all, which is exactly why
         # the real feature is faint in the radargram; it is isolated instead by
         # subtracting the transition-free twin, and that difference is what the
@@ -270,7 +352,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
         t_rec = shown.t
         tr_par, tr_perp = traces[bright], traces[dim]
         rec_par, rec_perp = recorded[bright], recorded[dim]
-        save_snapshots(cache, panels, sx, sz, stimes,
+        save_snapshots(cache, panels, sx, sz, stimes, stamp=stamp,
                        t_rec=t_rec, tr_par=tr_par, tr_perp=tr_perp,
                        rec_par=rec_par, rec_perp=rec_perp)
 
@@ -324,6 +406,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
             f"antenna. A fabric "
             "contrast can never exceed about -51 dB, so it sits well below the layering."
         ),
+        bare=bare,
     )
     print(f"  wrote {OUT / 'dipping_fabric.mp4'}")
 
@@ -403,7 +486,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
         f"polarisation contrast {ratio:.0f} dB", loc="left",
     )
     fig.tight_layout()
-    fig.savefig(OUT / "geometry.png")
+    save_figure(fig, OUT / "geometry.png", bare)
     plt.close(fig)
     print(f"  wrote {OUT / 'geometry.png'}")
 
@@ -427,7 +510,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
         loc="left",
     )
     fig.tight_layout()
-    fig.savefig(OUT / "permittivity_jump.png")
+    save_figure(fig, OUT / "permittivity_jump.png", bare)
     plt.close(fig)
     print(f"  wrote {OUT / 'permittivity_jump.png'}")
 
@@ -484,7 +567,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None):
             x=0.008, ha="left", fontsize=15,
         )
         fig.tight_layout(rect=(0, 0, 1, 0.95))
-        fig.savefig(OUT / "radargram.png")
+        save_figure(fig, OUT / "radargram.png", bare)
         plt.close(fig)
         print(f"  wrote {OUT / 'radargram.png'}")
 
@@ -495,6 +578,15 @@ if __name__ == "__main__":
     p.add_argument("--render-only", action="store_true")
     p.add_argument("--radargram", action="store_true")
     p.add_argument("--processes", type=int, default=None)
+    p.add_argument("--out", default=None, metavar="DIR",
+                   help="write all outputs and caches under DIR "
+                        "instead of figures/exNN (for sweeps and "
+                        "cluster array jobs)")
+    p.add_argument("--bare", action="store_true",
+                   help="strip titles, notes, annotations and legends for slides")
     a = p.parse_args()
-    main(quick=a.quick, render_only=a.render_only, radargram=a.radargram,
-         processes=a.processes)
+    try:
+        main(quick=a.quick, render_only=a.render_only, radargram=a.radargram,
+             bare=a.bare, processes=a.processes, out=a.out)
+    except StaleCache as exc:
+        raise SystemExit(str(exc))

@@ -15,7 +15,13 @@ from radarwave.polarimetry import (
     unwrap_phase,
     volume_scattering,
 )
-from radarwave.scenes import IceModelBuilder, Layer, dipping_depth, undulating_depth
+from radarwave.scenes import (
+    IceModelBuilder,
+    Layer,
+    conformal_layering,
+    dipping_depth,
+    undulating_depth,
+)
 
 FC = 195e6
 
@@ -300,3 +306,173 @@ def test_analytic_handles_a_2d_stack():
     z = analytic(data, axis=0)
     assert z.shape == data.shape
     np.testing.assert_allclose(np.real(z), data, rtol=1e-9, atol=1e-12)
+
+
+def test_conformal_layering_clears_an_excluded_band():
+    """A band asked for is left empty, and only that band changes.
+
+    The exclusion must not shift the random stream: two models built from the
+    same seed have to share their stratigraphy everywhere outside the band, or
+    a run with the gap is not comparable with one without it.
+    """
+    band = (125.0, 155.0)
+    full = conformal_layering(300.0, seed=7)
+    gapped = conformal_layering(300.0, seed=7, exclude=band)
+
+    assert [lay.depth for lay in full if band[0] <= lay.depth <= band[1]]
+    assert not [lay.depth for lay in gapped if band[0] <= lay.depth <= band[1]]
+
+    outside = [lay for lay in full if not band[0] <= lay.depth <= band[1]]
+    assert len(outside) == len(gapped)
+    for a, b in zip(outside, gapped):
+        assert a.depth == b.depth
+        assert a.thickness == b.thickness
+        assert a.d_rho == b.d_rho
+        assert a.sigma_factor == b.sigma_factor
+
+
+def test_conformal_layering_accepts_several_excluded_bands():
+    bands = [(60.0, 80.0), (200.0, 230.0)]
+    layers = conformal_layering(300.0, seed=3, exclude=bands)
+    for lo, hi in bands:
+        assert not [lay.depth for lay in layers if lo <= lay.depth <= hi]
+    assert len(layers) > 3
+
+
+@pytest.mark.parametrize("empty", [[], (), np.empty((0, 2))])
+def test_conformal_layering_excludes_nothing_for_an_empty_band_list(empty):
+    """No bands is not an error: it is the same as not asking for any.
+
+    A caller that builds its bands programmatically naturally ends up with an
+    empty list, and a single band given as an array has to keep working.
+    """
+    reference = conformal_layering(300.0, seed=5)
+    assert [lay.depth for lay in conformal_layering(300.0, seed=5, exclude=empty)] == [
+        lay.depth for lay in reference
+    ]
+    one = conformal_layering(300.0, seed=5, exclude=np.array([125.0, 155.0]))
+    assert not [lay.depth for lay in one if 125.0 <= lay.depth <= 155.0]
+
+
+def test_strip_text_clears_titles_annotations_and_insets():
+    """--bare has to reach inset axes, which are not in ``fig.axes``.
+
+    Axis labels, tick labels and colourbar text are deliberately kept: they are
+    what lets a slide still be read quantitatively.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from radarwave.viz import strip_text
+
+    fig, ax = plt.subplots()
+    im = ax.imshow(np.arange(9).reshape(3, 3))
+    cb = fig.colorbar(im)
+    cb.set_label("colourbar label")
+    fig.suptitle("figure title")
+    fig.text(0.1, 0.9, "figure note")
+    ax.set_title("axes title", loc="left")
+    ax.set_xlabel("distance (m)")
+    ax.set_ylabel("depth (m)")
+    ax.annotate("in-plot label", (1, 1))
+    ax.plot([0, 1], [0, 1], label="a line")
+    ax.legend()
+    inset = ax.inset_axes([0.5, 0.5, 0.4, 0.4])
+    inset.set_title("inset title")
+    # A figure-level legend is not on any axes, so the per-axes sweep never sees
+    # it and it would otherwise survive --bare with its labels intact.
+    fig.legend(loc="lower right")
+
+    strip_text(fig)
+
+    assert list(fig.legends) == []
+
+    # The suptitle stays attached but blank: removing it leaves ``fig._suptitle``
+    # dangling and the next tight_layout dies measuring it.  Every other
+    # figure-level text goes.
+    assert fig._suptitle.get_text() == ""
+    assert [t.get_text() for t in fig.texts] == [""]
+    assert ax.get_title(loc="left") == ""
+    assert list(ax.texts) == []
+    assert ax.get_legend() is None
+    assert inset.get_title() == ""
+    # kept: the axes stay readable
+    assert ax.get_xlabel() == "distance (m)"
+    assert ax.get_ylabel() == "depth (m)"
+    assert cb.ax.get_ylabel() == "colourbar label"
+    plt.close(fig)
+
+
+def _common():
+    """The examples' shared helpers, which are a script directory, not a package."""
+    import sys
+    from pathlib import Path
+
+    path = str(Path(__file__).resolve().parents[1] / "examples")
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    import _common
+
+    return _common
+
+
+def test_snapshot_cache_roundtrips_with_a_matching_stamp(tmp_path):
+    mod = _common()
+    stamp = {"dx": 0.32, "xlim": (-110.0, 110.0), "fabric": {"lam_z": 0.8}}
+    cache = mod.save_snapshots(
+        tmp_path / "snapshots.npz", [(np.ones((2, 3, 4)), "E along 89 deg")],
+        np.arange(3.0), np.arange(4.0), np.arange(2.0), stamp=stamp, trace=np.zeros(5),
+    )
+    panels, x, z, times, extra = mod.load_snapshots(cache, stamp=stamp)
+    assert [lbl for _, lbl in panels] == ["E along 89 deg"]
+    assert panels[0][0].shape == (2, 3, 4)
+    # The stamp must not leak into the payload the caller unpacks.
+    assert sorted(extra) == ["trace"]
+    assert x.size == 3 and z.size == 4 and times.size == 2
+
+
+def test_snapshot_cache_refuses_a_stamp_that_does_not_match(tmp_path):
+    """A model change has to fail the reload, not be rendered under new numbers.
+
+    Re-rendering a stale cache draws the old wavefield and the old trace beside
+    predictions computed from the current constants, and nothing in the figure
+    says so -- which is exactly the failure this guards.
+    """
+    mod = _common()
+    args = ([(np.ones((2, 3, 4)), "panel")], np.arange(3.0), np.arange(4.0),
+            np.arange(2.0))
+    cache = mod.save_snapshots(tmp_path / "snapshots.npz", *args,
+                               stamp={"transition_width": 0.6, "dip_deg": 35.0})
+
+    with pytest.raises(mod.StaleCache) as exc:
+        mod.load_snapshots(cache, stamp={"transition_width": 1.2, "dip_deg": 35.0})
+    # The message has to name the parameter that moved, and only that one.
+    assert "transition_width" in str(exc.value)
+    assert "dip_deg" not in str(exc.value)
+    assert "--render-only" in str(exc.value)
+
+    # A parameter that did not exist when the cache was written also counts.
+    with pytest.raises(mod.StaleCache, match="layer_exclusion_band"):
+        mod.load_snapshots(cache, stamp={"transition_width": 0.6, "dip_deg": 35.0,
+                                         "layer_exclusion_band": (100.0, 130.0)})
+
+    # A parameter nested inside a mapping of constructor arguments is named as
+    # itself, not as the whole mapping having moved.
+    nested = mod.save_snapshots(
+        tmp_path / "nested.npz", *args,
+        stamp={"column": {"thickness": 1850.0, "sigma_ice": 1.2e-5}},
+    )
+    with pytest.raises(mod.StaleCache) as exc:
+        mod.load_snapshots(nested, stamp={"column": {"thickness": 1850.0,
+                                                     "sigma_ice": 9.9e-5}})
+    assert "column.sigma_ice: cache has 1.2e-05, model now has 9.9e-05" in str(exc.value)
+    assert "column.thickness" not in str(exc.value)
+
+    # A cache from before stamping existed cannot be trusted either.
+    unstamped = mod.save_snapshots(tmp_path / "old.npz", *args)
+    with pytest.raises(mod.StaleCache, match="no model stamp"):
+        mod.load_snapshots(unstamped, stamp={"transition_width": 1.2})
+    # ...but an unstamped cache still loads when no stamp is asked for.
+    assert mod.load_snapshots(unstamped)[0][0][1] == "panel"
