@@ -173,6 +173,7 @@ figures/**/*.npz
 figures/ex01/
 figures/ex02/
 figures/ex03/
+figures/validation/
 
 # macOS
 .DS_Store
