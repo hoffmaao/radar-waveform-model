@@ -138,6 +138,28 @@ def eigen_permittivity(lam_z, dlambda):
     return EPS_ICE_MEAN + DEPS_ICE * (lam - 1.0 / 3.0)
 
 
+def layer_exclusion(column, zlim):
+    """The nadir depth band whose two-way time collides with the event.
+
+    Which nadir depth would a layer have to sit at to arrive when the
+    transition does?  Not the transition's own depth: the specular ray leaves
+    at the dip angle, so it images at its perpendicular range.  Invert the
+    column's own two-way time rather than dividing by a nominal velocity, so
+    the firn is accounted for.  Shared with ex04, whose banded package images
+    from the same specular point.
+
+    Returns ``(d_event, (lo, hi))``.
+    """
+    _, _, pz = specular_geometry(0.0)
+    t_event = column.two_way_time(pz, z0=Z_ANT) / np.cos(np.deg2rad(DIP_DEG))
+    probe = np.linspace(0.0, zlim[1], 4001)
+    # Rounded to the millimetre: the band is 30 m wide, so nothing in the model
+    # can tell the difference, and it keeps a numpy release whose interpolation
+    # differs in the last digits from rejecting a cache as stale.
+    d_event = round(float(np.interp(t_event, column.two_way_time(probe, z0=Z_ANT), probe)), 3)
+    return d_event, (d_event - LAYER_GAP_HALFWIDTH, d_event + LAYER_GAP_HALFWIDTH)
+
+
 def build_models(xlim, zlim, dx):
     """Return the model with the fabric transition and its contrast-free twin."""
     column = IceColumn(**COLUMN)
@@ -146,19 +168,7 @@ def build_models(xlim, zlim, dx):
     def boundary(x):
         return dipping_depth(x, DEPTH_AT_X0, DIP_DEG)
 
-    # Which nadir depth would a layer have to sit at to arrive when the
-    # transition does?  Not the transition's own depth: the specular ray leaves
-    # at the dip angle, so it images at its perpendicular range.  Invert the
-    # column's own two-way time rather than dividing by a nominal velocity, so
-    # the firn is accounted for.
-    _, _, pz = specular_geometry(0.0)
-    t_event = column.two_way_time(pz, z0=Z_ANT) / np.cos(np.deg2rad(DIP_DEG))
-    probe = np.linspace(0.0, zlim[1], 4001)
-    # Rounded to the millimetre: the band is 30 m wide, so nothing in the model
-    # can tell the difference, and it keeps a numpy release whose interpolation
-    # differs in the last digits from rejecting a cache as stale.
-    d_event = round(float(np.interp(t_event, column.two_way_time(probe, z0=Z_ANT), probe)), 3)
-    exclude = (d_event - LAYER_GAP_HALFWIDTH, d_event + LAYER_GAP_HALFWIDTH)
+    d_event, exclude = layer_exclusion(column, zlim)
     layers = conformal_layering(zlim[1], exclude=exclude)
 
     with_fabric = IceModelBuilder(grid, column, surface=0.0, air=True)

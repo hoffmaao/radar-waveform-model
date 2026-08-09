@@ -173,6 +173,7 @@ figures/**/*.npz
 figures/ex01/
 figures/ex02/
 figures/ex03/
+figures/ex04/
 figures/validation/
 
 # macOS
