@@ -5,7 +5,7 @@ Two-dimensional FDTD modelling of radar waves in polar ice.
 The solver started as a Python port of the ground-penetrating-radar FDTD code of
 Irving and Knight (2006) and has been extended to handle the **anisotropic**,
 depth-varying dielectric structure of an ice sheet. That extension is what lets
-it model crystal-orientation fabric, and therefore the three things a
+it model crystal-orientation fabric, and therefore the four things a
 quad-polarimetric ice sounder actually sees:
 
 | example | what it shows |
@@ -13,6 +13,7 @@ quad-polarimetric ice sounder actually sees:
 | `examples/ex01_meteoric_layers.py` | a wave propagating into ice and reflecting off meteoric internal layering |
 | `examples/ex02_fabric_birefringence.py` | two polarisations separating in ice with a preferred orientation fabric |
 | `examples/ex03_dipping_fabric_transition.py` | a fabric transition that is not at nadir but still returns energy to the antenna |
+| `examples/ex04_banded_fabric.py` | a banded fabric package acting as a Bragg mirror - bright at its resonant frequency, gone off it |
 
 Each example writes an MP4 of the propagating wavefield plus supporting figures
 into `figures/`.
@@ -25,18 +26,19 @@ pip install -e ".[dev]"
 pytest                       # 80 tests, a few minutes
 ```
 
-## The three examples
+## The four examples
 
 ```bash
 python examples/ex01_meteoric_layers.py --radargram --processes 10
 python examples/ex02_fabric_birefringence.py
 python examples/ex03_dipping_fabric_transition.py --radargram --processes 10
+python examples/ex04_banded_fabric.py
 ```
 
 Add `--quick` to any of them for a small, fast version while iterating on the
 model, `--bare` to strip titles, figure notes, in-plot annotations and legends
 for slides - axis lines, ticks, tick numbers, axis labels and colourbars stay -
-and `--render-only` (examples 2 and 3) to re-render the movie from cached
+and `--render-only` (examples 2-4) to re-render the movie from cached
 snapshots without repeating the simulation. Each cache carries a stamp of the
 parameters that define its model, and `--render-only` refuses one that does not
 match - otherwise changing a model constant renders the old wavefield and the
@@ -254,6 +256,40 @@ Fresnel zone is metres across, so the return integrates over a band of it rather
 than a point. Nothing in this repository establishes which of those dominates,
 or even which way the ray-bending term pushes the prediction.
 
+### 4. Banded fabric
+
+Example 3 ends at a ceiling: a single fabric interface can never beat
+`r = deps / (4 eps)`, about -51 dB, and gradational smoothing only takes it
+further down. This example shows the one mechanism that beats the ceiling -
+coherent stacking. Strain banding, alternating fabric bands of the kind ice
+cores actually show, turns N weak interfaces into a Bragg mirror whose primary
+reflections add in phase at `f = v / (2 d)` for band period `d`. Twenty bands
+of the same contrast as example 3's single transition lift the response by
+roughly `20 log10(2N)` at resonance, from about -54 dB to about -22 dB,
+competitive with the brightest density layering anywhere in the column.
+
+The resonance is the fingerprint. The same 20-band package - dipping at 35
+degrees through example 3's geometry, layering and twin-difference processing -
+is sounded at two pulse frequencies: 60 MHz, where the banding is tuned, and
+45 MHz, a quarter-octave below. On resonance the return is bright; off it, it
+collapses. The measured on/off contrast is **+14.9 dB** against +20.7 dB from
+the transfer matrix - a lower bound, since the off-resonance window sits on
+the deep-layer transmission-residual floor rather than on silence. A reflector
+that appears in one frequency band and vanishes in another is banded fabric;
+nothing else in the reflectivity budget does that.
+
+Two presentation choices are deliberate. The transmitted wavelet is a
+narrowband (12 percent) Gabor rather than the broadband impulse the other
+examples use: the stack resonance is only about 1/N wide, so an impulse
+excites it from any centre frequency through its spectral skirt and the
+contrast collapses to a couple of dB - and a band-limited waveform is what a
+real chirped system delivers after pulse compression anyway (MCoRDS is about
+15 percent). And the received traces, in both the figure and the movie's
+trace panel, are shown pulse-compressed - correlated with the transmit
+wavelet - so every echo wears the zero-phase autocorrelation shape a
+processed radar product shows; on these noise-free traces that is a display
+transform, not an SNR gain.
+
 ## Package layout
 
 ```
@@ -293,7 +329,7 @@ nodes per wavelength is enough. For the birefringent delay it is not: the delay
 is a fraction of a time step and the dispersion error differs slightly between
 the two runs because their wave speeds differ. Measured against the traveltime
 model, the error is about +20% at 5.6 nodes per wavelength, +3.5% at 8, +0.6% at
-11 and +0.3% at 16. The examples run at 9-11; `--quick` runs at 5.6 and is for
+11 and +0.3% at 16. The examples run at 9-14; `--quick` runs at 5.6 and is for
 checking the pipeline, not for numbers.
 
 ## Changes from the original code
