@@ -426,7 +426,14 @@ def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_p
     return notes
 
 
-def main(quick=False, render_only=False, bare=False):
+def main(quick=False, render_only=False, bare=False, out=None):
+    # An output override is what lets many runs share a machine: without it,
+    # every invocation writes the same figures/exNN paths and a parameter sweep
+    # destroys its own results.  The cache guard catches the mixing after the
+    # fact; this prevents it.
+    if out is not None:
+        global OUT
+        OUT = Path(out)
     use_talk_style()
     OUT.mkdir(parents=True, exist_ok=True)
     cache = OUT / "snapshots.npz"
@@ -715,10 +722,14 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--quick", action="store_true")
     p.add_argument("--render-only", action="store_true")
+    p.add_argument("--out", default=None, metavar="DIR",
+                   help="write all outputs and caches under DIR "
+                        "instead of figures/exNN (for sweeps and "
+                        "cluster array jobs)")
     p.add_argument("--bare", action="store_true",
                    help="strip titles, notes, annotations and legends for slides")
     a = p.parse_args()
     try:
-        main(quick=a.quick, render_only=a.render_only, bare=a.bare)
+        main(quick=a.quick, render_only=a.render_only, bare=a.bare, out=a.out)
     except StaleCache as exc:
         raise SystemExit(str(exc))
