@@ -21,6 +21,10 @@ opr_guess = {'/home/matlab/opr/matlab/em_model', ...
 for k = 1:numel(opr_guess)
   if exist(opr_guess{k}, 'dir'), addpath(opr_guess{k}); break; end
 end
+% After em_model, so this directory wins the path race: specularNadir invokes
+% a PRISM-era physicalConstants script that the OPR clone does not carry, and
+% the shim next to this driver supplies it.
+addpath(here);
 assert(exist('specularNadir', 'file') == 2, ...
   'em_model not on path: mount/clone gitlab.com/openpolarradar/opr');
 
