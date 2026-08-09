@@ -40,7 +40,10 @@ and `--render-only` (examples 2 and 3) to re-render the movie from cached
 snapshots without repeating the simulation. Each cache carries a stamp of the
 parameters that define its model, and `--render-only` refuses one that does not
 match - otherwise changing a model constant renders the old wavefield and the
-old trace underneath predictions computed from the new constant.
+old trace underneath predictions computed from the new constant. `--out DIR`
+sends every figure and cache under `DIR` instead of `figures/exNN`, which is
+what keeps parameter sweeps and cluster array jobs from clobbering each other -
+`cluster/README.md` has the sweep pattern and Slurm templates.
 
 `--radargram` is the expensive part of examples 1 and 3 by a wide margin. For
 example 1 the wider domain costs ~1.7x the cells per shot and spans 23 shots
@@ -345,6 +348,16 @@ from. Beyond that:
   axis labels, tick numbers and colourbar text a slide still needs;
 * that a snapshot cache written from one model is refused by another, naming the
   parameter that moved.
+
+Beyond the test suite, `validation/` holds cross-code checks against tools the
+package deliberately does not depend on: `thin_layer_check.py` scores the
+solver against the exact transfer-matrix response of a thin layer, the
+`*gprmax*` scripts run the same models through a local gprMax build (its
+python and repo paths are passed on the command line; gprMax is never
+imported), and `emmodel_export.py` / `emmodel_driver.m` bridge to the
+CReSIS/OPR `em_model` MATLAB library, whose driver runs wherever that toolbox
+lives. Each script's docstring states what it validates and what it cannot;
+their figures land in `figures/validation/`.
 
 ## References
 
