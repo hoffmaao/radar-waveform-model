@@ -91,10 +91,6 @@ def main(bare=False):
     ax.set_title("difference", loc="left")
     ax.grid(alpha=0.2)
 
-    band = (t > 0.3e-6) & (t < 1.9e-6)
-    med = float(np.median(diff[band]))
-    p90 = float(np.percentile(np.abs(diff[band] - med), 90))
-
     # The number that means something: agreement ON THE REFLECTION EVENTS.
     # Between events the trace is the 2-D line-source wake, whose level rides
     # on each code's low-frequency source content -- outside the band the
@@ -126,7 +122,6 @@ def main(bare=False):
         fig.tight_layout(rect=(0, 0, 1, 1))
     path = OUT / "ex03_gprmax_comparison.png"
     fig.savefig(path)
-    print(f"median offset {med:+.3f} dB, 90th pct spread {p90:.3f} dB")
     print("wrote", path)
 
 

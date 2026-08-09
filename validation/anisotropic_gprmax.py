@@ -86,7 +86,12 @@ def main(gpr_python, gpr_repo):
     # ---- gprMax, anisotropy declared natively -------------------------------
     d = OUT / "gprmax"
     d.mkdir(parents=True, exist_ok=True)
-    nx, nz = shape
+    # The property grid samples at HALF-cell resolution (see
+    # compare_ex03_gprmax.py): sizing the domain from its shape stretches it
+    # 2x per axis.  Count the cell centres instead.
+    xc, zc = grid.x[1::2], grid.z[1::2]
+    assert abs((xc[1] - xc[0]) - dx) < 1e-9, "cell-centre stride is not dx"
+    nx, nz = xc.size, zc.size
     wave = d / "aniso_wave.txt"
     # Padded past the window: gprMax's own dt makes its last sample time land
     # just outside the supplied vector otherwise, and it raises rather than

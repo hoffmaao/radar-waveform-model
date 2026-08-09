@@ -27,7 +27,8 @@ OUT = REPO / "figures" / "validation"
 def main(gpr_python, gpr_repo, quick=False):
     dx = 0.6 if quick else 0.20
     xlim, zlim = (-110.0, 110.0), (-8.0, 300.0)
-    column, grid, model, twin, boundary, layers = ex03.build_models(xlim, zlim, dx)
+    column, grid, model, twin, boundary, layers, _exclude = ex03.build_models(
+        xlim, zlim, dx)
 
     # The bright polarisation: the TM solver reads eps_yy, so ex03 feeds it
     # eps_xx.  That scalar map is exactly what gprMax will be given.
