@@ -138,7 +138,7 @@ def eigen_permittivity(lam_z, dlambda):
     return EPS_ICE_MEAN + DEPS_ICE * (lam - 1.0 / 3.0)
 
 
-def layer_exclusion(column, zlim):
+def layer_exclusion(column, zlim, x_antenna=0.0):
     """The nadir depth band whose two-way time collides with the event.
 
     Which nadir depth would a layer have to sit at to arrive when the
@@ -150,7 +150,7 @@ def layer_exclusion(column, zlim):
 
     Returns ``(d_event, (lo, hi))``.
     """
-    _, _, pz = specular_geometry(0.0)
+    _, _, pz = specular_geometry(x_antenna)
     t_event = column.two_way_time(pz, z0=Z_ANT) / np.cos(np.deg2rad(DIP_DEG))
     probe = np.linspace(0.0, zlim[1], 4001)
     # Rounded to the millimetre: the band is 30 m wide, so nothing in the model
