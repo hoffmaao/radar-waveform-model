@@ -73,12 +73,11 @@ DEPTH_AT_X0 = 350.0
 #: antenna itself the interface is deeper by tan(dip) times the offset.
 SRC_X = 55.0
 
-# ex03's helpers (specular_geometry, layer_exclusion) read its module
-# constants, so this example points them at its own geometry -- the sweep
-# pattern cluster/README documents.  Standalone ex03 runs are untouched;
-# this rebinding lives and dies with the ex04 process.
-ex03.DIP_DEG = DIP_DEG
-ex03.DEPTH_AT_X0 = DEPTH_AT_X0
+# ex03's helpers default to ex03's own dip and depth, so every call below
+# passes this example's instead.  Assigning to ex03.DIP_DEG here would be
+# shorter, but it would rewrite ex03's geometry for anything else sharing the
+# interpreter -- importing this module would silently move ex03's specular
+# point -- and an import should not have that effect.
 
 from radarwave import (
     C0,
@@ -161,7 +160,7 @@ def build_models(xlim, zlim, dx):
     def boundary(x):
         return dipping_depth(x, DEPTH_AT_X0, DIP_DEG)
 
-    d_event, exclude = ex03.layer_exclusion(column, zlim, SRC_X)
+    d_event, exclude = ex03.layer_exclusion(column, zlim, SRC_X, DIP_DEG, DEPTH_AT_X0)
     layers = conformal_layering(zlim[1], exclude=exclude)
 
     period = band_period()
@@ -355,7 +354,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
     t = np.arange(0.0, t_end, dt)
     src = np.array([[SRC_X, Z_ANT]])
 
-    slant, px, pz = ex03.specular_geometry(SRC_X)
+    slant, px, pz = ex03.specular_geometry(SRC_X, DIP_DEG, DEPTH_AT_X0)
     print(f"banded package: {N_BANDS} bands, period {period:.2f} m "
           f"(Bragg {FC_ON/1e6:.0f} MHz), dip {DIP_DEG:.0f} deg")
     print(f"  specular point at x = {px:.1f} m, z = {pz:.1f} m")
