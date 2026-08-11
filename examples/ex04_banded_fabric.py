@@ -19,15 +19,16 @@ frequencies: on resonance the return is bright; a quarter-octave away it
 collapses by tens of dB.  A reflector that appears in one band and vanishes in
 another is banded fabric -- nothing else in the reflectivity budget does that.
 
-Geometry, layering, fabrics and processing are ex03's, imported from it: the
-package dips at 35 degrees through the same conformable stratigraphy, and the
-return is isolated the same way, by differencing against a package-free twin.
-The banding is periodic in the PERPENDICULAR distance to the dipping plane, so
-the Bragg condition holds along the specular ray.
+Layering, fabrics and processing are ex03's, imported from it, but the geometry
+is this example's own: the package dips at 12 degrees and crosses 350 m at
+x = 0, through the same conformable stratigraphy, and the return is isolated
+the same way, by differencing against a package-free twin.  The banding is
+periodic in the PERPENDICULAR distance to the dipping plane, so the Bragg
+condition holds along the specular ray.
 
 The bright polarisation is modelled the same way as ex03, by feeding the
 out-of-plane solver ``eps_xx``, and carries the same caveat: that substitution
-is validated at nadir, and its accuracy along a 35 degree ray is an open
+is validated at nadir, and its accuracy along a 12 degree ray is an open
 question tracked in the validation suite.  The resonance mechanism itself does
 not depend on it -- the band phasing is set by geometry, not by the tensor.
 
@@ -121,10 +122,11 @@ NARROWBAND_BW = 0.12
 WAVELET_T0 = 3.5e-7
 
 #: Each band edge is smoothed over this width.  A hard edge on a rectangular
-#: grid staircases at 35 degrees (the ex03 problem); 0.15 m is under a
-#: twentieth of a wavelength and costs about 1.6 dB across the whole stack,
-#: which the transfer-matrix prediction accounts for because it is computed
-#: from the same smoothed profile the grid carries.
+#: grid staircases wherever it cuts the cells obliquely, as this 12 degree
+#: package does (the ex03 problem); 0.15 m is under a twentieth of a wavelength
+#: and costs about 1.6 dB across the whole stack, which the transfer-matrix
+#: prediction accounts for because it is computed from the same smoothed
+#: profile the grid carries.
 BAND_EDGE_WIDTH = 0.15
 
 
@@ -416,8 +418,6 @@ def main(quick=False, render_only=False, bare=False, out=None):
     print(f"  off resonance ({FC_OFF/1e6:.0f} MHz): measured {level['off']:.1f} dB")
     print(f"  measured on/off contrast {level['on'] - level['off']:+.1f} dB; "
           f"transfer matrix predicts {20*np.log10(peak_on/peak_off):+.1f} dB")
-    print(f"  ex03's single off-nadir interface (35 deg) measured -115 dB; "
-          f"the stack sits {level['on'] + 115:.0f} dB above it")
 
     # Short centred kernels, shared by the movie panel and the figure: 'same'
     # correlation aligns a kernel by its middle sample, so the wavelet must be
@@ -506,7 +506,8 @@ def main(quick=False, render_only=False, bare=False, out=None):
     fig.tight_layout(rect=(0, 0, 1, 0.94))
     save_figure(fig, OUT / "resonance.png", bare)
     plt.close(fig)
-    print(f"  wrote {OUT / 'banded_fabric.mp4'} and {OUT / 'resonance.png'}")
+    print(f"  wrote {OUT / 'geometry.png'}, {OUT / 'banded_fabric.mp4'} "
+          f"and {OUT / 'resonance.png'}")
 
 
 if __name__ == "__main__":

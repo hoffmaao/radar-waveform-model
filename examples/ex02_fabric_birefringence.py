@@ -641,7 +641,8 @@ def main(quick=False, render_only=False, bare=False, out=None):
     # those are relative to the survey track, so carrying them into a figure
     # that also names polarisations relative to the FABRIC axis would put two
     # different reference directions behind the same two symbols.
-    ax.set_xlabel(r"$\Delta\lambda = \lambda_{89^\circ} - \lambda_{179^\circ}$")
+    ax.set_xlabel(rf"$\Delta\lambda = \lambda_{{{PERP_AZ}^\circ}} - "
+                  rf"\lambda_{{{PAR_AZ}^\circ}}$")
     ax.set_ylabel("depth (m)")
     ax.set_ylim(column.thickness, 0)
     ax.set_title(f"1.  Ridge A fabric\n(axis {FABRIC_AZ} deg E of N, the slow "
