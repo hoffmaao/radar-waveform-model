@@ -87,6 +87,15 @@ FC = 60e6  # FDTD source frequency
 FC_MCORDS = 195e6  # centre frequency of the real Ridge A product
 NPML = 12
 PERP_AZ, PAR_AZ = 89, 179  # horizontal principal axes, degrees east of north
+#: The fabric axis itself: the horizontal direction the c axes concentrate
+#: along, which is the inverted theta0 at Ridge A.  Because a c axis is the
+#: high-permittivity direction of the crystal, that is also the SLOW axis, so
+#: ``lam_perp > lam_par`` and a wave polarised along it lags one polarised
+#: across it.  Every polarisation in the figures below is named by its angle to
+#: this axis rather than by its azimuth: the delay depends only on that angle,
+#: and a reader should not have to subtract two bearings to see which trace is
+#: the eigenmode and which is the 45 deg mixture.
+FABRIC_AZ = PERP_AZ
 LAYER_DEPTHS = (60.0, 130.0, 210.0, 300.0, 420.0, 560.0, 700.0)  # acidity horizons
 Z_SRC = 3.0  # antenna buried a few metres into the firn
 REC_TOP, REC_STEP, REC_MARGIN = 40.0, 20.0, 25.0  # nadir receiver string
@@ -267,11 +276,16 @@ def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_p
     eigen = [("ridge", "perp"), ("ridge", "par"), ("strong", "perp"), ("strong", "par")]
     mixed = [("ridge", "co"), ("ridge", "cross"), ("strong", "co"), ("strong", "cross")]
     order = eigen + mixed
+    # Named by angle to the fabric axis, not by azimuth: that angle is what
+    # sets the delay, and it is what separates the two eigenmodes (0 and 90)
+    # from the 45 deg mixture below.  The azimuths behind the names are stated
+    # once in the header rather than repeated in all eight titles, which is
+    # both shorter and what keeps adjacent titles from colliding.
     names = {
-        "perp": f"E along {PERP_AZ} deg (slow)",
-        "par": f"E along {PAR_AZ} deg (fast)",
-        "co": "45 deg launch, co-pol",
-        "cross": "45 deg launch, cross-pol",
+        "perp": "E along the fabric axis (slow)",
+        "par": "E across the fabric axis (fast)",
+        "co": "E at 45 deg to the axis, co-pol",
+        "cross": "E at 45 deg to the axis, cross-pol",
     }
     colours = {"perp": "#2166ac", "par": "#b2182b", "co": "#6a3d9a", "cross": "#1b7837"}
     titles = {"ridge": "Ridge A fabric", "strong": f"strong fabric (dlam = {STRONG_DLAMBDA:g})"}
@@ -401,8 +415,8 @@ def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_p
         # a null every half cycle of it.
         cycles = abs(float(col.birefringent_delay(deepest))) * FC
         notes.append(
-            f"{titles[k]}: the {PERP_AZ} deg return from {deepest:.0f} m arrives "
-            f"{shift * 1e9:.2f} ns later than {PAR_AZ} deg (traveltime model "
+            f"{titles[k]}: the along-fabric-axis return from {deepest:.0f} m arrives "
+            f"{shift * 1e9:.2f} ns later than the across-axis one (traveltime model "
             f"{model * 1e9:.2f} ns); down at {float(np.asarray(rec_z)[-1]):.0f} m the two "
             f"are still within {abs(float(np.asarray(amp_db)[-1])):.2f} dB in amplitude. "
             f"That delay is {cycles:.2f} cycles at {FC / 1e6:.0f} MHz, so a 45 deg launch "
@@ -410,10 +424,12 @@ def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_p
         )
 
     header = [
-        "Top row, the fabric's own eigenpolarisations: it changes when the reflections "
-        "arrive, not how strong they are.",
-        "Bottom row, a 45 deg launch, which is what a survey actually transmits: the two "
-        "modes recombine and beat, so the same delay now shows up as amplitude.",
+        f"Top row, the fabric's own eigenpolarisations - the axis lies at {FABRIC_AZ} deg "
+        f"E of N, so 'along' is {PERP_AZ} deg and 'across' is {PAR_AZ} deg: the fabric "
+        "changes when the reflections arrive, not how strong they are.",
+        "Bottom row, a launch at 45 deg to the fabric axis, which is what a survey actually "
+        "transmits: the two modes recombine and beat, so the same delay now shows up as "
+        "amplitude.",
         "Dotted lines mark each layer; the inset magnifies the deepest return, dashed "
         "line at the fast-axis arrival.",
     ] + notes
@@ -496,8 +512,8 @@ def main(quick=False, render_only=False, bare=False, out=None):
                 margin = 0.07 * (xlim[1] - xlim[0])
                 panels, sx, sz = crop_snapshots(
                     [
-                        (perp.snapshots, f"E along {PERP_AZ} deg  (slow axis)"),
-                        (par.snapshots, f"E along {PAR_AZ} deg  (fast axis)"),
+                        (perp.snapshots, "E along the fabric axis  (slow)"),
+                        (par.snapshots, "E across the fabric axis  (fast)"),
                     ],
                     par.snapshot_x,
                     par.snapshot_z,
@@ -540,8 +556,8 @@ def main(quick=False, render_only=False, bare=False, out=None):
         trace={
             "t": surface["strong"]["t"],
             "series": [
-                (surface["strong"]["perp"], f"{PERP_AZ} deg (slow)", "#2166ac"),
-                (surface["strong"]["par"], f"{PAR_AZ} deg (fast)", "#b2182b"),
+                (surface["strong"]["perp"], "along fabric axis (slow)", "#2166ac"),
+                (surface["strong"]["par"], "across fabric axis (fast)", "#b2182b"),
             ],
             "db": True,
             # From the antenna, which is buried in the firn, and offset by the
@@ -621,11 +637,15 @@ def main(quick=False, render_only=False, bare=False, out=None):
     zfine = np.linspace(0, column.thickness, 600)
     ax = axes[0]
     ax.plot(ridge_a_dlambda(zfine), zfine, color="#b2182b", lw=2)
-    ax.set_xlabel(r"$\Delta\lambda = \lambda_\perp - \lambda_\parallel$")
+    # Named by azimuth rather than by the perp/par subscripts the model uses:
+    # those are relative to the survey track, so carrying them into a figure
+    # that also names polarisations relative to the FABRIC axis would put two
+    # different reference directions behind the same two symbols.
+    ax.set_xlabel(r"$\Delta\lambda = \lambda_{89^\circ} - \lambda_{179^\circ}$")
     ax.set_ylabel("depth (m)")
     ax.set_ylim(column.thickness, 0)
-    ax.set_title(f"1.  Ridge A fabric\n({PERP_AZ} vs {PAR_AZ} deg E of N)",
-                 loc="left", fontsize=12)
+    ax.set_title(f"1.  Ridge A fabric\n(axis {FABRIC_AZ} deg E of N, the slow "
+                 "direction)", loc="left", fontsize=12)
 
     # FDTD validation, on its own depth range so the points are readable.
     ax = axes[1]
