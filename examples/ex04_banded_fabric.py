@@ -212,13 +212,17 @@ def build_models(xlim, zlim, dx):
             boundary, exclude, period)
 
 
-def predicted_response(period, pulse, dt):
-    """Envelope-peak stack response vs a sharp single interface, broadband.
+def stack_reflectivity(period, f):
+    """Complex reflection coefficient of the band stack at frequencies ``f``.
 
-    The transfer matrix is run over the actual smoothed band profile, the
-    pulse is filtered through it, and the envelope peak is referenced to the
-    incident pulse -- the same construction validated against the FDTD to
-    0.4 dB for the ex03 transition width.
+    The transfer matrix is run over the actual smoothed band profile, the same
+    construction validated against the FDTD to 0.4 dB for the ex03 transition
+    width.  The layer product is carried over the whole frequency axis at once:
+    the profile is a couple of thousand 0.02 m slabs and the record is long
+    enough that the in-band bin count runs into the thousands, so a bin-at-a-time
+    Python loop would be the dominant cost of every ``--render-only`` re-render.
+    The layers still multiply in their original order, so the result is the
+    same to the last bit.
     """
     ea = eigen_permittivity(**ABOVE)[0]
     eb = eigen_permittivity(**BELOW)[0]
@@ -226,28 +230,40 @@ def predicted_response(period, pulse, dt):
     s = np.arange(-8.0, N_BANDS * period + 8.0, dz)
     prof = ea + (eb - ea) * band_fraction(s, period)
 
-    n_fft = 8 * len(pulse)
-    f = np.fft.rfftfreq(n_fft, dt)
     r = np.zeros(f.size, dtype=complex)
-    for i, fq in enumerate(f):
-        if fq < 5e6 or fq > 200e6:
-            continue
-        k0 = 2 * np.pi * fq / C0
-        n = np.sqrt(prof.astype(complex))
-        M = np.eye(2, dtype=complex)
-        for nj in n:
-            ph = k0 * nj * dz
-            M = M @ np.array([[np.cos(ph), 1j * np.sin(ph) / nj],
-                              [1j * nj * np.sin(ph), np.cos(ph)]])
-        n0, ns = n[0], n[-1]
-        num = n0 * (M[0, 0] + M[0, 1] * ns) - (M[1, 0] + M[1, 1] * ns)
-        den = n0 * (M[0, 0] + M[0, 1] * ns) + (M[1, 0] + M[1, 1] * ns)
-        r[i] = num / den
+    band = (f >= 5e6) & (f <= 200e6)
+    k0 = 2 * np.pi * f[band] / C0
+    n = np.sqrt(prof.astype(complex))
+    M = np.zeros((k0.size, 2, 2), dtype=complex)
+    M[:, 0, 0] = M[:, 1, 1] = 1.0
+    L = np.empty_like(M)
+    for nj in n:
+        ph = k0 * nj * dz
+        cos_ph, sin_ph = np.cos(ph), np.sin(ph)
+        L[:, 0, 0] = cos_ph
+        L[:, 0, 1] = 1j * sin_ph / nj
+        L[:, 1, 0] = 1j * nj * sin_ph
+        L[:, 1, 1] = cos_ph
+        M = M @ L
+    n0, ns = n[0], n[-1]
+    num = n0 * (M[:, 0, 0] + M[:, 0, 1] * ns) - (M[:, 1, 0] + M[:, 1, 1] * ns)
+    den = n0 * (M[:, 0, 0] + M[:, 0, 1] * ns) + (M[:, 1, 0] + M[:, 1, 1] * ns)
+    r[band] = num / den
+    return r
+
+
+def predicted_response(pulse, r, n_fft):
+    """Envelope-peak stack response vs a sharp single interface, broadband.
+
+    The pulse is filtered through the stack's reflectivity and the envelope peak
+    is referenced to the incident pulse.  ``r`` depends only on the package and
+    the frequency axis, never on which pulse is sounding it, so both runs share
+    one :func:`stack_reflectivity` call.
+    """
     S = np.fft.rfft(pulse, n_fft)
     echo = np.fft.irfft(S * r, n_fft)
     inc = np.fft.irfft(S, n_fft)
-    peak = float(np.max(np.abs(analytic(echo)))) / float(np.max(np.abs(analytic(inc))))
-    return peak, f, np.abs(r)
+    return float(np.max(np.abs(analytic(echo)))) / float(np.max(np.abs(analytic(inc))))
 
 
 def matched_filter(trace, wavelet):
@@ -283,9 +299,25 @@ def geometry_figure(model, boundary, period, px, pz, bare):
     dl = np.asarray(model.eps["xx"], dtype=float) - np.asarray(model.eps["yy"], dtype=float)
     x, z = model.x, model.z
 
-    fig, axes = plt.subplots(1, 2, figsize=(14.5, 7.6),
-                             gridspec_kw={"width_ratios": [1.55, 1.0]})
-    ax = axes[0]
+    # The scene is drawn at true aspect -- the whole point of the panel is that
+    # the dip and the ray angle are the real ones -- so the panel is sized from
+    # the domain rather than the other way round: a half-kilometre-deep, quarter-
+    # kilometre-wide domain in a slot picked for a landscape figure would draw a
+    # narrow strip and leave the rest of the slot blank.  Axes are placed in
+    # inches, so the box the equal-aspect scene needs is the box it gets.
+    scene_aspect = float((x[-1] - x[0]) / (z[-1] - z[0]))
+    m_left, m_gap, m_right = 0.95, 1.15, 0.30
+    m_bottom, m_top = 0.80, 0.62
+    scene_h = 7.1
+    scene_w = scene_h * scene_aspect
+    prof_w = 5.6
+    fig_w = m_left + scene_w + m_gap + prof_w + m_right
+    fig_h = m_bottom + scene_h + m_top
+    fig = plt.figure(figsize=(fig_w, fig_h))
+    ax = fig.add_axes((m_left / fig_w, m_bottom / fig_h,
+                       scene_w / fig_w, scene_h / fig_h))
+    ax2 = fig.add_axes(((m_left + scene_w + m_gap) / fig_w, m_bottom / fig_h,
+                        prof_w / fig_w, scene_h / fig_h))
     lim = float(np.abs(dl).max()) or 1.0
     ax.imshow(dl[::2, ::2].T, extent=(x[0], x[-1], z[-1], z[0]),
               aspect="equal", cmap="PuOr", vmin=-lim, vmax=lim)
@@ -303,8 +335,14 @@ def geometry_figure(model, boundary, period, px, pz, bare):
                  loc="left")
 
     # The inset is where the figure earns its keep: at domain scale the
-    # package is a featureless stripe, and the banding only exists here.
-    ins = ax.inset_axes([0.58, 0.04, 0.40, 0.34])
+    # package is a featureless stripe, and the banding only exists here.  Its
+    # window is square in metres, so its height fraction comes from the panel's
+    # own proportions -- given a fraction of its own the inset would draw square
+    # inside a taller slot and float free of the corner it is anchored to.  The
+    # bottom left is the one corner of a downdip package that stays empty, so
+    # the zoom and its title sit clear of the bands and the ray.
+    ins_w = 0.46
+    ins = ax.inset_axes([0.14, 0.03, ins_w, ins_w * scene_w / scene_h])
     ins.imshow(dl.T, extent=(x[0], x[-1], z[-1], z[0]), aspect="equal",
                cmap="PuOr", vmin=-lim, vmax=lim)
     half = 16.0
@@ -315,7 +353,6 @@ def geometry_figure(model, boundary, period, px, pz, bare):
     ins.set_title("the bands, at the specular point", fontsize=8.5, pad=2)
     ax.indicate_inset_zoom(ins, edgecolor="#333")
 
-    ax2 = axes[1]
     svec = np.arange(-4.0, N_BANDS * period + 4.0, 0.02)
     frac = band_fraction(svec, period)
     ea = eigen_permittivity(**ABOVE)
@@ -335,7 +372,6 @@ def geometry_figure(model, boundary, period, px, pz, bare):
     ax2.grid(alpha=0.25)
     ax2.legend(fontsize=9, loc="lower left")
 
-    fig.tight_layout()
     save_figure(fig, OUT / "geometry.png", bare)
     plt.close(fig)
 
@@ -443,9 +479,12 @@ def main(quick=False, render_only=False, bare=False, out=None):
         tx = float(np.max(np.abs(analytic(recorded[key]))))
         level[key] = 20 * np.log10(float(np.max(env[win])) / tx)
     pulse_on = gabor(FC_ON, t_rec, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
-    peak_on, f_tm, r_tm = predicted_response(period, pulse_on, float(t_rec[1] - t_rec[0]))
     pulse_off = gabor(FC_OFF, t_rec, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
-    peak_off, _, _ = predicted_response(period, pulse_off, float(t_rec[1] - t_rec[0]))
+    n_fft = 8 * len(pulse_on)
+    f_tm = np.fft.rfftfreq(n_fft, float(t_rec[1] - t_rec[0]))
+    r_tm = stack_reflectivity(period, f_tm)
+    peak_on = predicted_response(pulse_on, r_tm, n_fft)
+    peak_off = predicted_response(pulse_off, r_tm, n_fft)
     print(f"  on  resonance ({FC_ON/1e6:.0f} MHz): measured {level['on']:.1f} dB "
           f"below the transmit pulse")
     print(f"  off resonance ({FC_OFF/1e6:.0f} MHz): measured {level['off']:.1f} dB")
@@ -492,7 +531,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
     fig, axes = plt.subplots(1, 2, figsize=(13.5, 6.8))
     ax = axes[0]
     band = (f_tm > 20e6) & (f_tm < 120e6)
-    ax.plot(f_tm[band] / 1e6, 20 * np.log10(np.maximum(r_tm[band], 1e-12)),
+    ax.plot(f_tm[band] / 1e6, 20 * np.log10(np.maximum(np.abs(r_tm[band]), 1e-12)),
             color="#333", lw=1.6, label="stack response (transfer matrix)")
     # Staggered, and the off-resonance one right-aligned, so the two labels
     # cannot collide across the 15 MHz between their markers.
