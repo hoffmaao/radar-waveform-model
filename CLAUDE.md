@@ -10,7 +10,7 @@ comparable with the Ridge A inversion.
 ## Commands
 
 ```sh
-.venv/bin/python -m pytest -q            # 82 tests, ~3 min - run before any commit
+.venv/bin/python -m pytest -q            # ~3 min - run before any commit
 .venv/bin/python -m pyflakes radarwave examples validation tests
 .venv/bin/python examples/ex0N_*.py [--quick] [--render-only] [--bare] [--out DIR]
 ```
