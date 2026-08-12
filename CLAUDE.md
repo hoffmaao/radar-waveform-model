@@ -19,8 +19,9 @@ comparable with the Ridge A inversion.
   left in `figures/` has twice been mistaken for the real thing.
 - `--render-only`: re-render figures/movies from the stamped `.npz` cache
   without re-simulating. A `StaleCache` error means the cache came from
-  different physics - that is the guard working; delete the cache or re-run,
-  never weaken the stamp.
+  different physics, or is not there at all - that is the guard working (the
+  flag never falls back to simulating); delete the cache or re-run, never
+  weaken the stamp.
 - `--bare`: strip text for slides (axes and colourbars stay). Send ANNOTATED
   versions when the owner is reviewing; bare figures have been misread.
 - `--out DIR`: redirect all outputs+caches (sweeps, cluster array jobs).

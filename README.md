@@ -23,7 +23,7 @@ into `figures/`.
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest                       # 80 tests, a few minutes
+pytest                       # 82 tests, a few minutes
 ```
 
 ## The four examples
@@ -42,10 +42,12 @@ and `--render-only` (examples 2-4) to re-render the movie from cached
 snapshots without repeating the simulation. Each cache carries a stamp of the
 parameters that define its model, and `--render-only` refuses one that does not
 match - otherwise changing a model constant renders the old wavefield and the
-old trace underneath predictions computed from the new constant. `--out DIR`
-sends every figure and cache under `DIR` instead of `figures/exNN`, which is
-what keeps parameter sweeps and cluster array jobs from clobbering each other -
-`cluster/README.md` has the sweep pattern and Slurm templates.
+old trace underneath predictions computed from the new constant. A cache that is
+not there at all is refused the same way rather than falling back to simulating,
+which is the run the flag was chosen to avoid. `--out DIR` sends every figure and
+cache under `DIR` instead of `figures/exNN`, which is what keeps parameter sweeps
+and cluster array jobs from clobbering each other - `cluster/README.md` has the
+sweep pattern and Slurm templates.
 
 `--radargram` is the expensive part of examples 1 and 3 by a wide margin. For
 example 1 the wider domain costs ~1.7x the cells per shot and spans 23 shots
@@ -268,11 +270,23 @@ of the same contrast as example 3's single transition lift the response by
 roughly `20 log10(2N)` at resonance, from about -54 dB to about -22 dB,
 competitive with the brightest density layering anywhere in the column.
 
-The resonance is the fingerprint. The same 20-band package - dipping at 35
-degrees through example 3's geometry, layering and twin-difference processing -
-is sounded at two pulse frequencies: 60 MHz, where the banding is tuned, and
-45 MHz, a quarter-octave below. On resonance the return is bright; off it, it
-collapses. The measured on/off contrast is **+14.9 dB** against +20.7 dB from
+The package carries example 3's layering, fabrics and twin-difference
+processing, but its own geometry: deeper and gentler, dipping at 12 degrees and
+crossing 350 m below the surface at the centre of the domain. Dip and depth move
+together, because the specular point sits `h sin(delta) cos(delta)` updip of the
+antenna - at example 3's 35 degrees a 350 m package would return from 165 m
+off-axis, outside any affordable domain, while at 12 degrees it returns from
+about 71 m. The transmitter is offset 55 m right of centre, which stretches that
+ray across the frame and puts the specular point - 19 m left of centre, at 346 m
+depth - well clear of the domain edge, with the return arriving past 4 us and
+clear of the shallow layering. `geometry.png` draws the scene, the specular ray
+and the permittivity profile the wave meets, with an inset on the bands
+themselves: 1.4 m apart, and invisible at domain scale.
+
+The resonance is the fingerprint. The same 20-band package is sounded at two
+pulse frequencies: 60 MHz, where the banding is tuned, and 45 MHz, a
+quarter-octave below. On resonance the return is bright; off it, it
+collapses. The measured on/off contrast is **+19.6 dB** against +20.7 dB from
 the transfer matrix - a lower bound, since the off-resonance window sits on
 the deep-layer transmission-residual floor rather than on silence. A reflector
 that appears in one frequency band and vanishes in another is banded fabric;
