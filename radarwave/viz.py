@@ -7,6 +7,8 @@ buffer, which is far faster than re-drawing from scratch.
 """
 
 from pathlib import Path
+import textwrap
+
 import numpy as np
 
 from .polarimetry import analytic
@@ -457,8 +459,18 @@ def wavefield_movie(
             else "amplitude",
         ))
         trace_ax.set_ylabel("two-way time (us)")
-        trace_ax.set_title(trace.get("title", "recorded at the surface"),
-                           loc="left", fontsize=12)
+        # Wrap for the same reason the subtitle does, but against the column
+        # rather than the canvas: a left-aligned title starts at the trace
+        # axes' left edge, so the room it has is that panel's share of the
+        # width, not the figure's.  A deep model shrinks the canvas to its
+        # width floor and the panel with it, which is how a title that fits at
+        # ex03's 300 m domain runs off the edge at ex04's 560 m one.
+        trace_ax_width = figsize[0] * trace_width / (n_field + trace_width)
+        trace_ax.set_title(
+            "\n".join(textwrap.wrap(trace.get("title", "recorded at the surface"),
+                                    width=max(18, int(trace_ax_width * 9.0)),
+                                    break_on_hyphens=False)),
+            loc="left", fontsize=12)
         trace_ax.grid(alpha=0.25)
         if len(series) > 1:
             trace_ax.legend(fontsize=10, loc="lower center")
@@ -466,8 +478,6 @@ def wavefield_movie(
     fig.suptitle(title, x=0.012, ha="left", fontsize=15, y=0.995)
     if subtitle:
         # Wrap by hand: a long single line runs off the canvas and is clipped.
-        import textwrap
-
         wrapped = "\n".join(textwrap.wrap(subtitle, width=max(60, int(figsize[0] * 10.5))))
         fig.text(0.012, 0.955, wrapped, ha="left", va="top", fontsize=10.5, color="#222")
     clock = axes[-1].text(
