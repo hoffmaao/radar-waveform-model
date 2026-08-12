@@ -43,7 +43,15 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import StaleCache, echo_time, load_snapshots, save_figure, save_snapshots, stampable
+from _common import (
+    StaleCache,
+    echo_time,
+    load_snapshots,
+    render_from_cache,
+    save_figure,
+    save_snapshots,
+    stampable,
+)
 
 import ex03_dipping_fabric_transition as ex03
 from ex03_dipping_fabric_transition import (
@@ -136,6 +144,18 @@ def band_period():
     eb = eigen_permittivity(**BELOW)[0]
     v = C0 / np.sqrt(0.5 * (ea + eb))
     return float(v / (2.0 * FC_ON))
+
+
+def package_thickness(period):
+    """Vertical thickness of the whole package (m).
+
+    The bands are periodic in the perpendicular distance to the dipping plane,
+    so the package measures ``N * period`` across its normal and more than that
+    down a vertical line through it.  Every drawing of the package base goes
+    through here, so the geometry figure and the movie cannot end up disagreeing
+    about where it is.
+    """
+    return N_BANDS * period / np.cos(np.deg2rad(DIP_DEG))
 
 
 def band_fraction(s, period):
@@ -270,9 +290,8 @@ def geometry_figure(model, boundary, period, px, pz, bare):
     ax.imshow(dl[::2, ::2].T, extent=(x[0], x[-1], z[-1], z[0]),
               aspect="equal", cmap="PuOr", vmin=-lim, vmax=lim)
     top = boundary(x)
-    thick = N_BANDS * period / np.cos(np.deg2rad(DIP_DEG))
     ax.plot(x, top, color="#555", lw=0.9)
-    ax.plot(x, top + thick, color="#555", lw=0.9)
+    ax.plot(x, top + package_thickness(period), color="#555", lw=0.9)
     ax.plot([SRC_X], [Z_ANT], marker="v", ms=11, color="k")
     ax.annotate("antenna", (SRC_X + 4.0, Z_ANT - 6.0), fontsize=10)
     ax.plot([SRC_X, px], [Z_ANT, pz], "r--", lw=1.4)
@@ -360,9 +379,8 @@ def main(quick=False, render_only=False, bare=False, out=None):
     print(f"banded package: {N_BANDS} bands, period {period:.2f} m "
           f"(Bragg {FC_ON/1e6:.0f} MHz), dip {DIP_DEG:.0f} deg")
     print(f"  specular point at x = {px:.1f} m, z = {pz:.1f} m")
-    geometry_figure(banded, boundary, period, px, pz, bare)
 
-    if render_only and cache.exists():
+    if render_from_cache(cache, render_only):
         panels, sx, sz, stimes, extra = load_snapshots(cache, stamp=stamp)
         t_rec = extra["t_rec"]
         traces = {k: extra[f"tr_{k}"] for k in ("on", "off")}
@@ -392,14 +410,29 @@ def main(quick=False, render_only=False, bare=False, out=None):
                 shown = fields[0]
         t_rec = t
         stacks = [(shown.snapshots, f"{FC_ON/1e6:.0f} MHz, banded fabric")]
+        # Crop the wavefield to the depth the record can actually reach, so the
+        # wavefield and trace panels end at the same physical depth.  Showing
+        # deeper than that would need the trace axis to run past t_end, leaving
+        # a large blank strip beside depths no echo can return from.
+        margin = 8.0
+        depth_reached = float(
+            column.depth_from_two_way_time(t_rec[-1] - t_wave["on"], z0=Z_ANT)
+        )
         panels, sx, sz = crop_snapshots(
             stacks, shown.snapshot_x, shown.snapshot_z,
-            xlim=(xlim[0] + 8, xlim[1] - 8), zlim=(zlim[0], zlim[1] - 8))
+            xlim=(xlim[0] + margin, xlim[1] - margin),
+            zlim=(zlim[0], min(zlim[1] - margin, depth_reached)))
         stimes = shown.snapshot_times
         save_snapshots(cache, panels, sx, sz, stimes, stamp=stamp,
                        t_rec=t_rec, tr_on=traces["on"], tr_off=traces["off"],
                        rec_on=recorded["on"], rec_off=recorded["off"],
                        t_wave_on=t_wave["on"], t_wave_off=t_wave["off"])
+
+    # Drawn only once the cache has been accepted, so a stale one aborts before
+    # any figure is written: a geometry.png from the current constants sitting
+    # beside a movie and a resonance figure from the previous run is a set of
+    # artifacts nothing on disk marks as mixed.
+    geometry_figure(banded, boundary, period, px, pz, bare)
 
     # ---- measurement: on/off-resonance level against the prediction --------
     t_pred = float(echo_time(column, pz, Z_ANT, t_wave["on"], dip_deg=DIP_DEG))
@@ -437,8 +470,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
     wavefield_movie(
         OUT / "banded_fabric.mp4", panels[0][0], sx, sz, stimes,
         contours=[(grid.x, boundary(grid.x)),
-                  (grid.x, boundary(grid.x) + N_BANDS * period
-                   / np.cos(np.deg2rad(DIP_DEG)))],
+                  (grid.x, boundary(grid.x) + package_thickness(period))],
         trace={"t": t_rec,
                "series": [(rec_mf, "received", "#b2182b")],
                "db": True,

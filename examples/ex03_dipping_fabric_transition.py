@@ -56,6 +56,7 @@ from _common import (
     StaleCache,
     echo_time,
     load_snapshots,
+    render_from_cache,
     save_figure,
     save_snapshots,
     stampable,
@@ -315,7 +316,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None, bare=F
     print(f"  normal-incidence reflection: 89 deg pol {20 * np.log10(r_perp):.1f} dB, "
           f"179 deg pol {20 * np.log10(r_par):.1f} dB")
 
-    if render_only and cache.exists():
+    if render_from_cache(cache, render_only):
         panels, sx, sz, stimes, extra = load_snapshots(cache, stamp=stamp)
         t_rec, tr_par, tr_perp = extra["t_rec"], extra["tr_par"], extra["tr_perp"]
         rec_par, rec_perp = extra["rec_par"], extra["rec_perp"]

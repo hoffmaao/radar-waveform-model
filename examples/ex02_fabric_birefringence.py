@@ -50,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import (
     StaleCache,
     load_snapshots,
+    render_from_cache,
     save_figure,
     save_snapshots,
     stampable,
@@ -459,7 +460,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
     column = IceColumn(**RIDGE_A)
     stamp = cache_stamp(quick)
 
-    if render_only and cache.exists():
+    if render_from_cache(cache, render_only):
         panels, sx, sz, stimes, extra = load_snapshots(cache, stamp=stamp)
         fpeak = float(extra["fpeak"])
         t_wave = float(extra["t_wave"])

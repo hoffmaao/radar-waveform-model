@@ -20,6 +20,25 @@ class StaleCache(RuntimeError):
     """A cache was written from a different model than the one asked for."""
 
 
+def render_from_cache(path, render_only):
+    """Whether to render from ``path``, refusing a cache that is not there.
+
+    ``--render-only`` asks for a re-render *without* simulating, so a missing
+    cache is a failure of the request, not a reason to fall back to the
+    simulation: these examples are tens of minutes and gigabytes apiece, and a
+    silent fallback spends both on a run the flag was chosen to avoid.  Missing
+    and stale are the same answer -- this cache cannot serve this request -- so
+    both raise :class:`StaleCache`, before any figure has been written.
+    """
+    path = Path(path)
+    if render_only and not path.exists():
+        raise StaleCache(
+            f"{path} does not exist, so --render-only has no snapshots to "
+            f"render.  Re-run without --render-only to simulate them."
+        )
+    return render_only
+
+
 def echo_time(column, depth, z_ant, t_wave, dip_deg=0.0):
     """When the echo from ``depth`` peaks in the record (s).
 
