@@ -13,7 +13,7 @@ so remote and local results cannot silently mix.
 git clone https://github.com/hoffmaao/radar-waveform-model
 cd radar-waveform-model
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest -q          # 80 tests; verifies the install
+.venv/bin/python -m pytest -q          # verifies the install
 ```
 
 Requirements: Python >= 3.9.  Set `MPLBACKEND=Agg` on headless nodes (the

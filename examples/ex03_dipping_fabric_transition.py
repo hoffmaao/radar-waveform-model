@@ -56,6 +56,7 @@ from _common import (
     StaleCache,
     echo_time,
     load_snapshots,
+    render_from_cache,
     save_figure,
     save_snapshots,
     stampable,
@@ -138,7 +139,21 @@ def eigen_permittivity(lam_z, dlambda):
     return EPS_ICE_MEAN + DEPS_ICE * (lam - 1.0 / 3.0)
 
 
-def layer_exclusion(column, zlim):
+def _geometry(dip_deg=None, depth_at_x0=None):
+    """Resolve a caller's geometry against this example's own.
+
+    The module constants are the default rather than the only answer, because
+    ex04 sounds the same shape at a different dip and depth and has to say so
+    without reaching in and reassigning them: a caller that mutates the globals
+    changes this example for everything else sharing the interpreter.  Read at
+    call time, so the sweep drivers in ``cluster/`` -- which patch the globals
+    in a process of their own and then call ``main`` -- keep working.
+    """
+    return (DIP_DEG if dip_deg is None else dip_deg,
+            DEPTH_AT_X0 if depth_at_x0 is None else depth_at_x0)
+
+
+def layer_exclusion(column, zlim, x_antenna=0.0, dip_deg=None, depth_at_x0=None):
     """The nadir depth band whose two-way time collides with the event.
 
     Which nadir depth would a layer have to sit at to arrive when the
@@ -146,12 +161,13 @@ def layer_exclusion(column, zlim):
     at the dip angle, so it images at its perpendicular range.  Invert the
     column's own two-way time rather than dividing by a nominal velocity, so
     the firn is accounted for.  Shared with ex04, whose banded package images
-    from the same specular point.
+    from its own specular point at its own dip.
 
     Returns ``(d_event, (lo, hi))``.
     """
-    _, _, pz = specular_geometry(0.0)
-    t_event = column.two_way_time(pz, z0=Z_ANT) / np.cos(np.deg2rad(DIP_DEG))
+    dip, depth = _geometry(dip_deg, depth_at_x0)
+    _, _, pz = specular_geometry(x_antenna, dip, depth)
+    t_event = column.two_way_time(pz, z0=Z_ANT) / np.cos(np.deg2rad(dip))
     probe = np.linspace(0.0, zlim[1], 4001)
     # Rounded to the millimetre: the band is 30 m wide, so nothing in the model
     # can tell the difference, and it keeps a numpy release whose interpolation
@@ -208,7 +224,7 @@ def build_models(xlim, zlim, dx):
             without.finalize(npml=NPML), boundary, layers, exclude)
 
 
-def specular_geometry(x_antenna=0.0):
+def specular_geometry(x_antenna=0.0, dip_deg=None, depth_at_x0=None):
     """Where the return recorded at ``x_antenna`` actually comes from.
 
     Returns ``(slant_range, px, pz)``.  ``slant_range`` is the perpendicular
@@ -223,8 +239,9 @@ def specular_geometry(x_antenna=0.0):
     instead leaves the air leg pointing somewhere else and quietly lengthens the
     path.
     """
-    d = np.deg2rad(DIP_DEG)
-    h = DEPTH_AT_X0 - Z_ANT + np.tan(d) * x_antenna  # interface depth below the antenna
+    dip, depth = _geometry(dip_deg, depth_at_x0)
+    d = np.deg2rad(dip)
+    h = depth - Z_ANT + np.tan(d) * x_antenna  # interface depth below the antenna
     slant_range = h * np.cos(d)
     px = x_antenna - slant_range * np.sin(d)
     pz = Z_ANT + slant_range * np.cos(d)
@@ -299,7 +316,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None, bare=F
     print(f"  normal-incidence reflection: 89 deg pol {20 * np.log10(r_perp):.1f} dB, "
           f"179 deg pol {20 * np.log10(r_par):.1f} dB")
 
-    if render_only and cache.exists():
+    if render_from_cache(cache, render_only):
         panels, sx, sz, stimes, extra = load_snapshots(cache, stamp=stamp)
         t_rec, tr_par, tr_perp = extra["t_rec"], extra["tr_par"], extra["tr_perp"]
         rec_par, rec_perp = extra["rec_par"], extra["rec_perp"]

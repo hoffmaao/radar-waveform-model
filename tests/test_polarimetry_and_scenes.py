@@ -405,14 +405,19 @@ def test_strip_text_clears_titles_annotations_and_insets():
     plt.close(fig)
 
 
-def _common():
-    """The examples' shared helpers, which are a script directory, not a package."""
+def _examples_on_path():
+    """Put the examples on ``sys.path``: they are a script directory, not a package."""
     import sys
     from pathlib import Path
 
     path = str(Path(__file__).resolve().parents[1] / "examples")
     if path not in sys.path:
         sys.path.insert(0, path)
+
+
+def _common():
+    """The examples' shared helpers."""
+    _examples_on_path()
     import _common
 
     return _common
@@ -476,3 +481,51 @@ def test_snapshot_cache_refuses_a_stamp_that_does_not_match(tmp_path):
         mod.load_snapshots(unstamped, stamp={"transition_width": 1.2})
     # ...but an unstamped cache still loads when no stamp is asked for.
     assert mod.load_snapshots(unstamped)[0][0][1] == "panel"
+
+
+def test_render_only_refuses_a_cache_that_is_not_there(tmp_path):
+    """A missing cache is a failed request, not a licence to simulate.
+
+    Falling through to the simulation costs tens of minutes and gigabytes on
+    exactly the run ``--render-only`` was chosen to avoid, so it has to fail the
+    same way a stale cache does.
+    """
+    mod = _common()
+    missing = tmp_path / "snapshots.npz"
+
+    with pytest.raises(mod.StaleCache) as exc:
+        mod.render_from_cache(missing, render_only=True)
+    assert str(missing) in str(exc.value)
+    assert "--render-only" in str(exc.value)
+
+    # Without the flag a missing cache is simply the run that has to happen.
+    assert mod.render_from_cache(missing, render_only=False) is False
+
+    mod.save_snapshots(missing, [(np.ones((2, 3, 4)), "panel")],
+                       np.arange(3.0), np.arange(4.0), np.arange(2.0))
+    assert mod.render_from_cache(missing, render_only=True) is True
+
+
+def test_importing_ex04_leaves_ex03s_geometry_alone():
+    """Importing one example must not re-aim another one's geometry.
+
+    ex04 sounds the same shape at its own dip and depth.  Assigning those to
+    ex03's module constants would be shorter than passing them, and would move
+    ex03's specular point from -82.7 m to -71.4 m for anything else sharing the
+    interpreter -- silently, since ex03 would still print a self-consistent
+    number.  Both modules do no work at import time, so pinning it is cheap.
+    """
+    _examples_on_path()
+    import ex03_dipping_fabric_transition as ex03
+    import ex04_banded_fabric as ex04
+
+    assert ex03.DIP_DEG == 35.0
+    assert ex03.DEPTH_AT_X0 == 175.0
+    _, px, pz = ex03.specular_geometry(0.0)
+    assert px == pytest.approx(-82.69, abs=0.01)
+    assert pz == pytest.approx(117.09, abs=0.01)
+
+    # ...while ex04 still gets its own geometry out of the shared helper.
+    _, px4, pz4 = ex03.specular_geometry(ex04.SRC_X, ex04.DIP_DEG, ex04.DEPTH_AT_X0)
+    assert px4 == pytest.approx(-18.76, abs=0.01)
+    assert pz4 == pytest.approx(346.01, abs=0.01)

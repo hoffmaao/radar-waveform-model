@@ -19,15 +19,16 @@ frequencies: on resonance the return is bright; a quarter-octave away it
 collapses by tens of dB.  A reflector that appears in one band and vanishes in
 another is banded fabric -- nothing else in the reflectivity budget does that.
 
-Geometry, layering, fabrics and processing are ex03's, imported from it: the
-package dips at 35 degrees through the same conformable stratigraphy, and the
-return is isolated the same way, by differencing against a package-free twin.
-The banding is periodic in the PERPENDICULAR distance to the dipping plane, so
-the Bragg condition holds along the specular ray.
+Layering, fabrics and processing are ex03's, imported from it, but the geometry
+is this example's own: the package dips at 12 degrees and crosses 350 m at
+x = 0, through the same conformable stratigraphy, and the return is isolated
+the same way, by differencing against a package-free twin.  The banding is
+periodic in the PERPENDICULAR distance to the dipping plane, so the Bragg
+condition holds along the specular ray.
 
 The bright polarisation is modelled the same way as ex03, by feeding the
 out-of-plane solver ``eps_xx``, and carries the same caveat: that substitution
-is validated at nadir, and its accuracy along a 35 degree ray is an open
+is validated at nadir, and its accuracy along a 12 degree ray is an open
 question tracked in the validation suite.  The resonance mechanism itself does
 not depend on it -- the band phasing is set by geometry, not by the tensor.
 
@@ -42,20 +43,50 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import StaleCache, echo_time, load_snapshots, save_figure, save_snapshots, stampable
+from _common import (
+    StaleCache,
+    echo_time,
+    load_snapshots,
+    render_from_cache,
+    save_figure,
+    save_snapshots,
+    stampable,
+)
 
 import ex03_dipping_fabric_transition as ex03
 from ex03_dipping_fabric_transition import (
     ABOVE,
     BELOW,
     COLUMN,
-    DEPTH_AT_X0,
-    DIP_DEG,
     LAYER_GAP_HALFWIDTH,
     NPML,
     Z_ANT,
     eigen_permittivity,
 )
+
+#: This example's own geometry: deeper and gentler than ex03's.  The two move
+#: together, because the specular point sits at x = -h sin(d) cos(d): at
+#: ex03's 35 degrees a 350 m package would reflect from 165 m off axis,
+#: outside any affordable domain, while at 12 degrees it reflects from 71 m --
+#: inside a modestly widened one.  The deep, gentle package is also the one
+#: that reads like the Ridge A feature, and its return arrives ~4.4 us,
+#: cleanly separated from the shallow layering in the received panel.
+DIP_DEG = 12.0
+DEPTH_AT_X0 = 350.0
+
+#: The transmitter sits right of centre.  The specular point lies updip of the
+#: antenna, so an offset stretches the ray across the frame and makes the
+#: off-nadir origin of the return impossible to misread -- and it moves the
+#: specular point toward the middle of the domain, well clear of the edge
+#: taper.  DEPTH_AT_X0 keeps its meaning (package depth at x = 0); under the
+#: antenna itself the interface is deeper by tan(dip) times the offset.
+SRC_X = 55.0
+
+# ex03's helpers default to ex03's own dip and depth, so every call below
+# passes this example's instead.  Assigning to ex03.DIP_DEG here would be
+# shorter, but it would rewrite ex03's geometry for anything else sharing the
+# interpreter -- importing this module would silently move ex03's specular
+# point -- and an import should not have that effect.
 
 from radarwave import (
     C0,
@@ -99,10 +130,11 @@ NARROWBAND_BW = 0.12
 WAVELET_T0 = 3.5e-7
 
 #: Each band edge is smoothed over this width.  A hard edge on a rectangular
-#: grid staircases at 35 degrees (the ex03 problem); 0.15 m is under a
-#: twentieth of a wavelength and costs about 1.6 dB across the whole stack,
-#: which the transfer-matrix prediction accounts for because it is computed
-#: from the same smoothed profile the grid carries.
+#: grid staircases wherever it cuts the cells obliquely, as this 12 degree
+#: package does (the ex03 problem); 0.15 m is under a twentieth of a wavelength
+#: and costs about 1.6 dB across the whole stack, which the transfer-matrix
+#: prediction accounts for because it is computed from the same smoothed
+#: profile the grid carries.
 BAND_EDGE_WIDTH = 0.15
 
 
@@ -112,6 +144,18 @@ def band_period():
     eb = eigen_permittivity(**BELOW)[0]
     v = C0 / np.sqrt(0.5 * (ea + eb))
     return float(v / (2.0 * FC_ON))
+
+
+def package_thickness(period):
+    """Vertical thickness of the whole package (m).
+
+    The bands are periodic in the perpendicular distance to the dipping plane,
+    so the package measures ``N * period`` across its normal and more than that
+    down a vertical line through it.  Every drawing of the package base goes
+    through here, so the geometry figure and the movie cannot end up disagreeing
+    about where it is.
+    """
+    return N_BANDS * period / np.cos(np.deg2rad(DIP_DEG))
 
 
 def band_fraction(s, period):
@@ -138,7 +182,7 @@ def build_models(xlim, zlim, dx):
     def boundary(x):
         return dipping_depth(x, DEPTH_AT_X0, DIP_DEG)
 
-    d_event, exclude = ex03.layer_exclusion(column, zlim)
+    d_event, exclude = ex03.layer_exclusion(column, zlim, SRC_X, DIP_DEG, DEPTH_AT_X0)
     layers = conformal_layering(zlim[1], exclude=exclude)
 
     period = band_period()
@@ -168,13 +212,17 @@ def build_models(xlim, zlim, dx):
             boundary, exclude, period)
 
 
-def predicted_response(period, pulse, dt):
-    """Envelope-peak stack response vs a sharp single interface, broadband.
+def stack_reflectivity(period, f):
+    """Complex reflection coefficient of the band stack at frequencies ``f``.
 
-    The transfer matrix is run over the actual smoothed band profile, the
-    pulse is filtered through it, and the envelope peak is referenced to the
-    incident pulse -- the same construction validated against the FDTD to
-    0.4 dB for the ex03 transition width.
+    The transfer matrix is run over the actual smoothed band profile, the same
+    construction validated against the FDTD to 0.4 dB for the ex03 transition
+    width.  The layer product is carried over the whole frequency axis at once:
+    the profile is a couple of thousand 0.02 m slabs and the record is long
+    enough that the in-band bin count runs into the thousands, so a bin-at-a-time
+    Python loop would be the dominant cost of every ``--render-only`` re-render.
+    The layers still multiply in their original order, so the result is the
+    same to the last bit.
     """
     ea = eigen_permittivity(**ABOVE)[0]
     eb = eigen_permittivity(**BELOW)[0]
@@ -182,28 +230,40 @@ def predicted_response(period, pulse, dt):
     s = np.arange(-8.0, N_BANDS * period + 8.0, dz)
     prof = ea + (eb - ea) * band_fraction(s, period)
 
-    n_fft = 8 * len(pulse)
-    f = np.fft.rfftfreq(n_fft, dt)
     r = np.zeros(f.size, dtype=complex)
-    for i, fq in enumerate(f):
-        if fq < 5e6 or fq > 200e6:
-            continue
-        k0 = 2 * np.pi * fq / C0
-        n = np.sqrt(prof.astype(complex))
-        M = np.eye(2, dtype=complex)
-        for nj in n:
-            ph = k0 * nj * dz
-            M = M @ np.array([[np.cos(ph), 1j * np.sin(ph) / nj],
-                              [1j * nj * np.sin(ph), np.cos(ph)]])
-        n0, ns = n[0], n[-1]
-        num = n0 * (M[0, 0] + M[0, 1] * ns) - (M[1, 0] + M[1, 1] * ns)
-        den = n0 * (M[0, 0] + M[0, 1] * ns) + (M[1, 0] + M[1, 1] * ns)
-        r[i] = num / den
+    band = (f >= 5e6) & (f <= 200e6)
+    k0 = 2 * np.pi * f[band] / C0
+    n = np.sqrt(prof.astype(complex))
+    M = np.zeros((k0.size, 2, 2), dtype=complex)
+    M[:, 0, 0] = M[:, 1, 1] = 1.0
+    L = np.empty_like(M)
+    for nj in n:
+        ph = k0 * nj * dz
+        cos_ph, sin_ph = np.cos(ph), np.sin(ph)
+        L[:, 0, 0] = cos_ph
+        L[:, 0, 1] = 1j * sin_ph / nj
+        L[:, 1, 0] = 1j * nj * sin_ph
+        L[:, 1, 1] = cos_ph
+        M = M @ L
+    n0, ns = n[0], n[-1]
+    num = n0 * (M[:, 0, 0] + M[:, 0, 1] * ns) - (M[:, 1, 0] + M[:, 1, 1] * ns)
+    den = n0 * (M[:, 0, 0] + M[:, 0, 1] * ns) + (M[:, 1, 0] + M[:, 1, 1] * ns)
+    r[band] = num / den
+    return r
+
+
+def predicted_response(pulse, r, n_fft):
+    """Envelope-peak stack response vs a sharp single interface, broadband.
+
+    The pulse is filtered through the stack's reflectivity and the envelope peak
+    is referenced to the incident pulse.  ``r`` depends only on the package and
+    the frequency axis, never on which pulse is sounding it, so both runs share
+    one :func:`stack_reflectivity` call.
+    """
     S = np.fft.rfft(pulse, n_fft)
     echo = np.fft.irfft(S * r, n_fft)
     inc = np.fft.irfft(S, n_fft)
-    peak = float(np.max(np.abs(analytic(echo)))) / float(np.max(np.abs(analytic(inc))))
-    return peak, f, np.abs(r)
+    return float(np.max(np.abs(analytic(echo)))) / float(np.max(np.abs(analytic(inc))))
 
 
 def matched_filter(trace, wavelet):
@@ -224,6 +284,98 @@ def matched_filter(trace, wavelet):
     return np.correlate(np.asarray(trace, dtype=float), w, mode="same")
 
 
+def geometry_figure(model, boundary, period, px, pz, bare):
+    """The scene: where the bands are, where the return comes from, and the
+    one-dimensional profile the resonance argument runs on.
+
+    The bands are 1.4 m in a half-kilometre domain, invisible at figure scale,
+    so an inset zooms on the specular point where the reflection actually
+    forms.  The right panel is the perpendicular permittivity profile for both
+    eigenpolarisations: the bright one swings band to band, the dim one barely
+    moves -- the polarisation selectivity and the Bragg period in one picture.
+    """
+    import matplotlib.pyplot as plt
+
+    dl = np.asarray(model.eps["xx"], dtype=float) - np.asarray(model.eps["yy"], dtype=float)
+    x, z = model.x, model.z
+
+    # The scene is drawn at true aspect -- the whole point of the panel is that
+    # the dip and the ray angle are the real ones -- so the panel is sized from
+    # the domain rather than the other way round: a half-kilometre-deep, quarter-
+    # kilometre-wide domain in a slot picked for a landscape figure would draw a
+    # narrow strip and leave the rest of the slot blank.  Axes are placed in
+    # inches, so the box the equal-aspect scene needs is the box it gets.
+    scene_aspect = float((x[-1] - x[0]) / (z[-1] - z[0]))
+    m_left, m_gap, m_right = 0.95, 1.15, 0.30
+    m_bottom, m_top = 0.80, 0.62
+    scene_h = 7.1
+    scene_w = scene_h * scene_aspect
+    prof_w = 5.6
+    fig_w = m_left + scene_w + m_gap + prof_w + m_right
+    fig_h = m_bottom + scene_h + m_top
+    fig = plt.figure(figsize=(fig_w, fig_h))
+    ax = fig.add_axes((m_left / fig_w, m_bottom / fig_h,
+                       scene_w / fig_w, scene_h / fig_h))
+    ax2 = fig.add_axes(((m_left + scene_w + m_gap) / fig_w, m_bottom / fig_h,
+                        prof_w / fig_w, scene_h / fig_h))
+    lim = float(np.abs(dl).max()) or 1.0
+    ax.imshow(dl[::2, ::2].T, extent=(x[0], x[-1], z[-1], z[0]),
+              aspect="equal", cmap="PuOr", vmin=-lim, vmax=lim)
+    top = boundary(x)
+    ax.plot(x, top, color="#555", lw=0.9)
+    ax.plot(x, top + package_thickness(period), color="#555", lw=0.9)
+    ax.plot([SRC_X], [Z_ANT], marker="v", ms=11, color="k")
+    ax.annotate("antenna", (SRC_X + 4.0, Z_ANT - 6.0), fontsize=10)
+    ax.plot([SRC_X, px], [Z_ANT, pz], "r--", lw=1.4)
+    ax.plot([px], [pz], "ro", ms=7)
+    ax.annotate("specular point", (px + 6.0, pz - 8.0), fontsize=10, color="r")
+    ax.set_xlabel("distance (m)")
+    ax.set_ylabel("depth (m)")
+    ax.set_title(f"{N_BANDS} bands, period {period:.2f} m, dip {DIP_DEG:.0f} deg",
+                 loc="left")
+
+    # The inset is where the figure earns its keep: at domain scale the
+    # package is a featureless stripe, and the banding only exists here.  Its
+    # window is square in metres, so its height fraction comes from the panel's
+    # own proportions -- given a fraction of its own the inset would draw square
+    # inside a taller slot and float free of the corner it is anchored to.  The
+    # bottom left is the one corner of a downdip package that stays empty, so
+    # the zoom and its title sit clear of the bands and the ray.
+    ins_w = 0.46
+    ins = ax.inset_axes([0.14, 0.03, ins_w, ins_w * scene_w / scene_h])
+    ins.imshow(dl.T, extent=(x[0], x[-1], z[-1], z[0]), aspect="equal",
+               cmap="PuOr", vmin=-lim, vmax=lim)
+    half = 16.0
+    ins.set_xlim(px - half, px + half)
+    ins.set_ylim(pz + half, pz - half)
+    ins.plot([px], [pz], "ro", ms=5)
+    ins.tick_params(labelsize=7)
+    ins.set_title("the bands, at the specular point", fontsize=8.5, pad=2)
+    ax.indicate_inset_zoom(ins, edgecolor="#333")
+
+    svec = np.arange(-4.0, N_BANDS * period + 4.0, 0.02)
+    frac = band_fraction(svec, period)
+    ea = eigen_permittivity(**ABOVE)
+    eb = eigen_permittivity(**BELOW)
+    for k, (name, colour) in enumerate((("eps_xx (bright)", "#b2182b"),
+                                        ("eps_yy (dim)", "#2166ac"))):
+        prof = ea[k] + (eb[k] - ea[k]) * frac
+        ax2.plot(prof, svec, lw=1.3, color=colour, label=name)
+    ax2.axhspan(0.0, N_BANDS * period, color="#eee", zorder=0)
+    ax2.annotate(f"period {period:.2f} m = half a wavelength at "
+                 f"{FC_ON/1e6:.0f} MHz",
+                 (0.03, 0.985), xycoords="axes fraction", va="top", fontsize=9)
+    ax2.set_ylim(svec[-1], svec[0])
+    ax2.set_xlabel("relative permittivity")
+    ax2.set_ylabel("distance along the interface normal (m)")
+    ax2.set_title("the profile the wave meets", loc="left")
+    ax2.grid(alpha=0.25)
+    ax2.legend(fontsize=9, loc="lower left")
+
+    save_figure(fig, OUT / "geometry.png", bare)
+    plt.close(fig)
+
+
 def main(quick=False, render_only=False, bare=False, out=None):
     if out is not None:
         global OUT
@@ -234,9 +386,13 @@ def main(quick=False, render_only=False, bare=False, out=None):
     import matplotlib.pyplot as plt
 
     dx = 0.5 if quick else 0.2
-    xlim = (-110.0, 110.0)
-    zlim = (-8.0, 300.0) if not quick else (-8.0, 260.0)
-    t_end = 1.95e-6
+    xlim = (-130.0, 130.0)
+    # Deep column, long record: the package top crosses 350 m under the
+    # antenna, the specular return arrives ~4.4 us, and the deep conformable
+    # layering fills the record around it.  --quick keeps the same geometry at
+    # coarse resolution, so it still exercises the deep arrival.
+    zlim = (-8.0, 560.0) if not quick else (-8.0, 430.0)
+    t_end = 6.2e-6 if not quick else 5.2e-6
 
     column, grid, banded, twin, boundary, exclude, period = build_models(xlim, zlim, dx)
     stamp = {
@@ -244,7 +400,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
         "fc_on": FC_ON, "fc_off": FC_OFF, "n_bands": N_BANDS,
         "narrowband_bw": NARROWBAND_BW, "wavelet_t0": WAVELET_T0,
         "band_period": round(period, 6), "band_edge_width": BAND_EDGE_WIDTH,
-        "npml": NPML, "z_ant": Z_ANT, "dip_deg": DIP_DEG,
+        "npml": NPML, "z_ant": Z_ANT, "src_x": SRC_X, "dip_deg": DIP_DEG,
         "depth_at_x0": DEPTH_AT_X0,
         "layer_gap_halfwidth": LAYER_GAP_HALFWIDTH,
         "layer_exclusion_band": tuple(round(b, 3) for b in exclude),
@@ -253,14 +409,14 @@ def main(quick=False, render_only=False, bare=False, out=None):
     }
     dt = 0.9 * max_time_step(banded.eps_min, banded.mu_min, banded.dx, banded.dz)
     t = np.arange(0.0, t_end, dt)
-    src = np.array([[0.0, Z_ANT]])
+    src = np.array([[SRC_X, Z_ANT]])
 
-    slant, px, pz = ex03.specular_geometry(0.0)
+    slant, px, pz = ex03.specular_geometry(SRC_X, DIP_DEG, DEPTH_AT_X0)
     print(f"banded package: {N_BANDS} bands, period {period:.2f} m "
           f"(Bragg {FC_ON/1e6:.0f} MHz), dip {DIP_DEG:.0f} deg")
     print(f"  specular point at x = {px:.1f} m, z = {pz:.1f} m")
 
-    if render_only and cache.exists():
+    if render_from_cache(cache, render_only):
         panels, sx, sz, stimes, extra = load_snapshots(cache, stamp=stamp)
         t_rec = extra["t_rec"]
         traces = {k: extra[f"tr_{k}"] for k in ("on", "off")}
@@ -290,14 +446,29 @@ def main(quick=False, render_only=False, bare=False, out=None):
                 shown = fields[0]
         t_rec = t
         stacks = [(shown.snapshots, f"{FC_ON/1e6:.0f} MHz, banded fabric")]
+        # Crop the wavefield to the depth the record can actually reach, so the
+        # wavefield and trace panels end at the same physical depth.  Showing
+        # deeper than that would need the trace axis to run past t_end, leaving
+        # a large blank strip beside depths no echo can return from.
+        margin = 8.0
+        depth_reached = float(
+            column.depth_from_two_way_time(t_rec[-1] - t_wave["on"], z0=Z_ANT)
+        )
         panels, sx, sz = crop_snapshots(
             stacks, shown.snapshot_x, shown.snapshot_z,
-            xlim=(xlim[0] + 8, xlim[1] - 8), zlim=(zlim[0], zlim[1] - 8))
+            xlim=(xlim[0] + margin, xlim[1] - margin),
+            zlim=(zlim[0], min(zlim[1] - margin, depth_reached)))
         stimes = shown.snapshot_times
         save_snapshots(cache, panels, sx, sz, stimes, stamp=stamp,
                        t_rec=t_rec, tr_on=traces["on"], tr_off=traces["off"],
                        rec_on=recorded["on"], rec_off=recorded["off"],
                        t_wave_on=t_wave["on"], t_wave_off=t_wave["off"])
+
+    # Drawn only once the cache has been accepted, so a stale one aborts before
+    # any figure is written: a geometry.png from the current constants sitting
+    # beside a movie and a resonance figure from the previous run is a set of
+    # artifacts nothing on disk marks as mixed.
+    geometry_figure(banded, boundary, period, px, pz, bare)
 
     # ---- measurement: on/off-resonance level against the prediction --------
     t_pred = float(echo_time(column, pz, Z_ANT, t_wave["on"], dip_deg=DIP_DEG))
@@ -308,16 +479,17 @@ def main(quick=False, render_only=False, bare=False, out=None):
         tx = float(np.max(np.abs(analytic(recorded[key]))))
         level[key] = 20 * np.log10(float(np.max(env[win])) / tx)
     pulse_on = gabor(FC_ON, t_rec, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
-    peak_on, f_tm, r_tm = predicted_response(period, pulse_on, float(t_rec[1] - t_rec[0]))
     pulse_off = gabor(FC_OFF, t_rec, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
-    peak_off, _, _ = predicted_response(period, pulse_off, float(t_rec[1] - t_rec[0]))
+    n_fft = 8 * len(pulse_on)
+    f_tm = np.fft.rfftfreq(n_fft, float(t_rec[1] - t_rec[0]))
+    r_tm = stack_reflectivity(period, f_tm)
+    peak_on = predicted_response(pulse_on, r_tm, n_fft)
+    peak_off = predicted_response(pulse_off, r_tm, n_fft)
     print(f"  on  resonance ({FC_ON/1e6:.0f} MHz): measured {level['on']:.1f} dB "
           f"below the transmit pulse")
     print(f"  off resonance ({FC_OFF/1e6:.0f} MHz): measured {level['off']:.1f} dB")
     print(f"  measured on/off contrast {level['on'] - level['off']:+.1f} dB; "
           f"transfer matrix predicts {20*np.log10(peak_on/peak_off):+.1f} dB")
-    print(f"  ex03's single interface at the same dip measured -115 dB; the "
-          f"stack sits {level['on'] + 115:.0f} dB above it")
 
     # Short centred kernels, shared by the movie panel and the figure: 'same'
     # correlation aligns a kernel by its middle sample, so the wavelet must be
@@ -337,8 +509,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
     wavefield_movie(
         OUT / "banded_fabric.mp4", panels[0][0], sx, sz, stimes,
         contours=[(grid.x, boundary(grid.x)),
-                  (grid.x, boundary(grid.x) + N_BANDS * period
-                   / np.cos(np.deg2rad(DIP_DEG)))],
+                  (grid.x, boundary(grid.x) + package_thickness(period))],
         trace={"t": t_rec,
                "series": [(rec_mf, "received", "#b2182b")],
                "db": True,
@@ -347,7 +518,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
                "xlim": (-125.0, 5.0),
                "xlabel": "matched-filtered return\n(dB re. compressed transmit pulse)",
                "title": "received at the antenna, pulse-compressed"},
-        title="A banded fabric package at 35 degrees",
+        title=f"A banded fabric package at {DIP_DEG:.0f} degrees",
         subtitle=(f"{N_BANDS} bands at the Bragg period for {FC_ON/1e6:.0f} MHz, "
                   f"sounded with a {NARROWBAND_BW*100:.0f} percent-bandwidth "
                   "wavelet (the post-compression band of a real system). "
@@ -360,7 +531,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
     fig, axes = plt.subplots(1, 2, figsize=(13.5, 6.8))
     ax = axes[0]
     band = (f_tm > 20e6) & (f_tm < 120e6)
-    ax.plot(f_tm[band] / 1e6, 20 * np.log10(np.maximum(r_tm[band], 1e-12)),
+    ax.plot(f_tm[band] / 1e6, 20 * np.log10(np.maximum(np.abs(r_tm[band]), 1e-12)),
             color="#333", lw=1.6, label="stack response (transfer matrix)")
     # Staggered, and the off-resonance one right-aligned, so the two labels
     # cannot collide across the 15 MHz between their markers.
@@ -398,7 +569,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
                 (0.03, 0.985), xycoords="axes fraction", va="top",
                 fontsize=8.5, color="#444")
     ax.grid(alpha=0.25)
-    ax.legend(fontsize=9, loc="lower left")
+    ax.legend(fontsize=9, loc="lower right")
     fig.suptitle(
         f"{N_BANDS} fabric bands, period {period:.2f} m, dipping "
         f"{DIP_DEG:.0f} deg: bright at {FC_ON/1e6:.0f} MHz, collapsed at "
@@ -406,7 +577,8 @@ def main(quick=False, render_only=False, bare=False, out=None):
     fig.tight_layout(rect=(0, 0, 1, 0.94))
     save_figure(fig, OUT / "resonance.png", bare)
     plt.close(fig)
-    print(f"  wrote {OUT / 'banded_fabric.mp4'} and {OUT / 'resonance.png'}")
+    print(f"  wrote {OUT / 'geometry.png'}, {OUT / 'banded_fabric.mp4'} "
+          f"and {OUT / 'resonance.png'}")
 
 
 if __name__ == "__main__":
