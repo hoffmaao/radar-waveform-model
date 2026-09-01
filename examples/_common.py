@@ -1,14 +1,16 @@
 """Helpers shared by the example scripts.
 
-Caching the snapshot stacks means the look of a movie can be re-tuned for a
-talk without paying for the simulation again -- run once, then iterate with
-``--render-only``.
+Caching what the simulation produced -- snapshot stacks for the examples that
+end in a movie, recorded traces for the ones that do not -- means a figure can
+be re-tuned for a talk without paying for the run again: run once, then iterate
+with ``--render-only``.
 
 A cache carries a stamp of the parameters that define the model it came from,
-and :func:`load_snapshots` refuses one whose stamp does not match what the
-caller is asking for.  Without that, changing a model constant and re-rendering
-draws the old wavefield and the old trace underneath the predicted numbers
-computed from the new constants, and nothing in the figure says so.
+and :func:`load_snapshots` and :func:`load_arrays` refuse one whose stamp does
+not match what the caller is asking for.  Without that, changing a model
+constant and re-rendering draws the old wavefield and the old traces underneath
+predicted numbers computed from the new constants, and nothing in the figure
+says so.
 """
 
 from pathlib import Path
@@ -25,16 +27,16 @@ def render_from_cache(path, render_only):
 
     ``--render-only`` asks for a re-render *without* simulating, so a missing
     cache is a failure of the request, not a reason to fall back to the
-    simulation: these examples are tens of minutes and gigabytes apiece, and a
-    silent fallback spends both on a run the flag was chosen to avoid.  Missing
-    and stale are the same answer -- this cache cannot serve this request -- so
-    both raise :class:`StaleCache`, before any figure has been written.
+    simulation: these examples are tens of minutes to hours apiece, and a silent
+    fallback spends that on a run the flag was chosen to avoid.  Missing and
+    stale are the same answer -- this cache cannot serve this request -- so both
+    raise :class:`StaleCache`, before any figure has been written.
     """
     path = Path(path)
     if render_only and not path.exists():
         raise StaleCache(
-            f"{path} does not exist, so --render-only has no snapshots to "
-            f"render.  Re-run without --render-only to simulate them."
+            f"{path} does not exist, so --render-only has nothing to render.  "
+            f"Re-run without --render-only to simulate it."
         )
     return render_only
 
@@ -140,9 +142,9 @@ _RESERVED = ("x", "z", "times", "labels", _STAMP_KEYS, _STAMP_VALUES)
 def _check_stamp(path, cached, stamp):
     """Raise :class:`StaleCache` unless ``cached`` matches ``stamp``."""
     want = _stamp_pairs(stamp)
-    advice = (f"Rendering from it would draw the cached wavefield and trace under "
-              f"the numbers predicted for the current model.  Delete {path} or "
-              f"re-run without --render-only.")
+    advice = (f"Rendering from it would draw the cached wavefield and traces "
+              f"under the numbers predicted for the current model.  Delete "
+              f"{path} or re-run without --render-only.")
     if cached is None:
         raise StaleCache(
             f"{path} carries no model stamp, so there is no way to tell which "
@@ -159,6 +161,53 @@ def _check_stamp(path, cached, stamp):
         )
 
 
+def _write_stamp(data, stamp):
+    """Add a stamp's flattened key/value arrays to a mapping bound for ``npz``."""
+    if stamp is None:
+        return
+    pairs = _stamp_pairs(stamp)
+    keys = sorted(pairs)
+    data[_STAMP_KEYS] = np.array(keys)
+    data[_STAMP_VALUES] = np.array([pairs[k] for k in keys])
+
+
+def _read_stamp(f):
+    """The stamp a loaded ``npz`` carries, or ``None`` if it has none."""
+    if _STAMP_KEYS in f.files and _STAMP_VALUES in f.files:
+        return {str(k): str(v) for k, v in zip(f[_STAMP_KEYS], f[_STAMP_VALUES])}
+    return None
+
+
+def save_arrays(path, stamp=None, **arrays):
+    """Cache named arrays under the same model stamp the snapshots use.
+
+    An example whose expensive output is a handful of traces rather than a
+    wavefield still wants the guard -- rendering a figure from traces produced
+    by a different model is exactly as wrong as rendering a movie from one --
+    so it gets the same stamp through a smaller door than
+    :func:`save_snapshots`, instead of being made to invent empty panels.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {k: np.asarray(v) for k, v in arrays.items()}
+    _write_stamp(data, stamp)
+    np.savez_compressed(path, **data)
+    return path
+
+
+def load_arrays(path, stamp=None):
+    """Return ``{name: array}`` written by :func:`save_arrays`.
+
+    Raises :class:`StaleCache` naming every parameter that differs when the
+    cache came from another model.
+    """
+    path = Path(path)
+    with np.load(path, allow_pickle=False) as f:
+        if stamp is not None:
+            _check_stamp(path, _read_stamp(f), stamp)
+        return {k: f[k] for k in f.files if k not in (_STAMP_KEYS, _STAMP_VALUES)}
+
+
 def save_snapshots(path, panels, x, z, times, stamp=None, **extra):
     """Cache snapshot stacks and their axes to a compressed ``.npz``.
 
@@ -173,11 +222,7 @@ def save_snapshots(path, panels, x, z, times, stamp=None, **extra):
     for k, (stack, _) in enumerate(panels):
         data[f"panel{k}"] = np.asarray(stack, dtype=np.float32)
     data.update({k: np.asarray(v) for k, v in extra.items()})
-    if stamp is not None:
-        pairs = _stamp_pairs(stamp)
-        keys = sorted(pairs)
-        data[_STAMP_KEYS] = np.array(keys)
-        data[_STAMP_VALUES] = np.array([pairs[k] for k in keys])
+    _write_stamp(data, stamp)
     np.savez_compressed(path, **data)
     return path
 
@@ -192,10 +237,7 @@ def load_snapshots(path, stamp=None):
     path = Path(path)
     with np.load(path, allow_pickle=False) as f:
         if stamp is not None:
-            cached = None
-            if _STAMP_KEYS in f.files and _STAMP_VALUES in f.files:
-                cached = {str(k): str(v) for k, v in zip(f[_STAMP_KEYS], f[_STAMP_VALUES])}
-            _check_stamp(path, cached, stamp)
+            _check_stamp(path, _read_stamp(f), stamp)
         labels = [str(s) for s in f["labels"]]
         panels = [(f[f"panel{k}"], labels[k]) for k in range(len(labels))]
         extra = {

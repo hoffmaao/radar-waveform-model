@@ -506,7 +506,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None, bare=F
     ax.set_xlim(0.9, 1.9)
     ax.set_ylim(-1.35, 1.35)
     ax.set_xlabel("two-way time (us)")
-    ax.set_ylabel("scattered amplitude (normalised)")
+    ax.set_ylabel("scattered amplitude")
     ax.legend(fontsize=11, loc="lower right")
     ax.set_title(
         f"recorded return at the antenna\n"
@@ -528,7 +528,7 @@ def main(quick=False, render_only=False, radargram=False, processes=None, bare=F
     lo = min(eps_a.min(), eps_b.min())
     hi = max(eps_a.max(), eps_b.max())
     ax.set_ylim(lo - 0.15 * (hi - lo), hi + 0.25 * (hi - lo))
-    ax.set_ylabel("solid-ice eigenpermittivity")
+    ax.set_ylabel("eigenpermittivity")
     ax.legend(fontsize=11)
     ax.set_title(
         f"the jump is polarisation dependent\n"

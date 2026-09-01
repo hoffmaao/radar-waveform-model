@@ -7,13 +7,16 @@ reproduce
 
 * reflections from meteoric internal layering,
 * birefringent splitting between the two eigenpolarisations of ice with a
-  horizontal crystal-orientation fabric, and
-* off-nadir returns from a dipping fabric transition.
+  horizontal crystal-orientation fabric,
+* off-nadir returns from a dipping fabric transition, and
+* the phase change a chirped sounder sees when it revisits the same ice year
+  after year and the ice has deformed underneath it.
 
-See ``examples/`` for the three scenarios.
+See ``examples/`` for the scenarios.
 """
 
 from .constants import C0, DEPS_ICE, EPS0, EPS_ICE_MEAN, MU0, V_ICE
+from .deform import VerticalStrain
 from .fdtd import FDTD2D, Result, run_common_offset
 from .grid import PropertyGrid, max_spatial_step, max_time_step, pad_grid, regrid
 from .ice import IceColumn, RIDGE_A, ridge_a_dlambda
@@ -25,10 +28,13 @@ from .sources import (
     gaussian_derivative,
     ricker,
 )
+from .waveform import ACCUM3, APRES, RadarSystem, lfm_chirp, range_compress
 
 __version__ = "0.2.0"
 
 __all__ = [
+    "ACCUM3",
+    "APRES",
     "C0",
     "DEPS_ICE",
     "EPS0",
@@ -38,16 +44,20 @@ __all__ = [
     "MU0",
     "PropertyGrid",
     "RIDGE_A",
+    "RadarSystem",
     "Result",
     "V_ICE",
+    "VerticalStrain",
     "blackharrispulse",
     "dominant_frequency",
     "envelope_peak_time",
     "gabor",
     "gaussian_derivative",
+    "lfm_chirp",
     "max_spatial_step",
     "max_time_step",
     "pad_grid",
+    "range_compress",
     "regrid",
     "ricker",
     "ridge_a_dlambda",

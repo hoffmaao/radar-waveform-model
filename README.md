@@ -6,7 +6,10 @@ The solver started as a Python port of the ground-penetrating-radar FDTD code of
 Irving and Knight (2006) and has been extended to handle the **anisotropic**,
 depth-varying dielectric structure of an ice sheet. That extension is what lets
 it model crystal-orientation fabric, and therefore the four things a
-quad-polarimetric ice sounder actually sees:
+quad-polarimetric ice sounder actually sees. Two further examples change the
+question from what is down there to what the ice is *doing*: they sound the same
+Lagrangian site once a year for four years, with the ice deforming in between,
+which is what a phase-sensitive instrument measures.
 
 | example | what it shows |
 | --- | --- |
@@ -14,32 +17,41 @@ quad-polarimetric ice sounder actually sees:
 | `examples/ex02_fabric_birefringence.py` | two polarisations separating in ice with a preferred orientation fabric |
 | `examples/ex03_dipping_fabric_transition.py` | a fabric transition that is not at nadir but still returns energy to the antenna |
 | `examples/ex04_banded_fabric.py` | a banded fabric package acting as a Bragg mirror - bright at its resonant frequency, gone off it |
+| `examples/ex05_apres_repeat.py` | an ApRES chirp into the same ice once a year for four years: deformation read off the phase |
+| `examples/ex06_eager_repeat.py` | the same five visits in the EAGER traverse's 600-900 MHz accum3 band - finer, and wrapping 2.5x as fast |
 
-Each example writes an MP4 of the propagating wavefield plus supporting figures
-into `figures/`.
+Examples 1-4 each write an MP4 of the propagating wavefield plus supporting
+figures into `figures/`. Examples 5 and 6 write figures only: every one of
+their epochs propagates through an identical medium, so consecutive wavefields
+differ by under a pixel and there is nothing to watch - the measurement is in
+the compressed records, in how the phase turns with depth, and in how it winds
+with time.
 
 ## Install
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest                       # 82 tests, a few minutes
+pytest                       # 102 tests, a few minutes
 ```
 
-## The four examples
+## The six examples
 
 ```bash
 python examples/ex01_meteoric_layers.py --radargram --processes 10
 python examples/ex02_fabric_birefringence.py
 python examples/ex03_dipping_fabric_transition.py --radargram --processes 10
 python examples/ex04_banded_fabric.py
+python examples/ex05_apres_repeat.py
+python examples/ex06_eager_repeat.py
 ```
 
 Add `--quick` to any of them for a small, fast version while iterating on the
 model, `--bare` to strip titles, figure notes, in-plot annotations and legends
 for slides - axis lines, ticks, tick numbers, axis labels and colourbars stay -
-and `--render-only` (examples 2-4) to re-render the movie from cached
-snapshots without repeating the simulation. Each cache carries a stamp of the
+and `--render-only` (examples 2-6) to re-render the figures from cached
+snapshots, or cached records for examples 5 and 6, without repeating the
+simulation. Each cache carries a stamp of the
 parameters that define its model, and `--render-only` refuses one that does not
 match - otherwise changing a model constant renders the old wavefield and the
 old trace underneath predictions computed from the new constant. A cache that is
@@ -62,11 +74,43 @@ kinds of contrast that make up meteoric stratigraphy: density (permittivity)
 banding in the firn, and volcanic acid (conductivity) horizons in the solid ice
 below. The layers undulate, with the amplitude growing downwards.
 
+**A bed at 500 m gives the layering something to be measured against.** Internal
+layering is a dielectric contrast of a few parts in a thousand; an ice/bedrock
+interface is a contrast of tens of percent, and at `eps = 6` for crystalline
+bedrock the Fresnel coefficient is **-16.0 dB**. The bed is flat on purpose - a
+dipping one sends its specular return off nadir, which is example 3's subject,
+and here the bed exists to be seen whole. It costs no extra simulation: its echo
+lands at 5.69 us, inside a record that already ran to 6.2 us, and the 60 m of
+rock beneath it was already in the domain.
+
+What the record then shows is *not* what those interface coefficients suggest,
+and that is the useful part. At the antenna the bed arrives **-0.2 dB against
+the brightest firn band** - dead level with it - because the extra 462 m of
+two-way path costs it 23.4 dB (11.2 spreading, 12.2 absorption), almost exactly
+what its interface gains it. The example prints that budget, and the
+reflectivity the balance implies for the layer: **-39 dB**, which is where
+density banding sits. As a check on the arithmetic, a thin-layer calculation for
+the brightest band this model actually contains gives -41 dB, so the budget
+closes to about 2 dB.
+
+A bed is therefore not "the bright one" because of its contrast alone. It is
+bright at the antenna only until the path catches up with it, and by 500 m it
+already has.
+
+At 0.30 m cells that rock is sampled at 4.9 nodes per wavelength, under the five
+this package otherwise works to. What is under-resolved there is the transmitted
+wave, which the PML absorbs and which never returns; the reflection is set by
+the impedance step and by the incident wave, which the ice resolves at 6.7.
+`tests/test_fdtd.py` checks that rather than asserting it - at example 1's own
+spacing a strong and a weak contrast reflect in the ratio of their Fresnel
+coefficients to within 8 percent, so the coarse rock costs about 0.6 dB on the
+bed and nothing on the layering.
+
 The movie has two panels. The left is the total electric field. The right is the
 trace the antenna records - receiver co-located with the transmitter - filling
 in as the wave travels, shown as returned power in dB referenced to the transmit
-pulse, with dotted lines at the two-way time of every layer put into the model.
-The peaks land on the lines.
+pulse, with dotted lines at the two-way time of every layer put into the model
+and a dashed line at the bed. The peaks land on the lines.
 
 The recorded trace and the section are plotted against two-way time. Layer
 positions are converted to time by integrating the actual slowness profile
@@ -304,6 +348,191 @@ wavelet - so every echo wears the zero-phase autocorrelation shape a
 processed radar product shows; on these noise-free traces that is a display
 transform, not an SNR gain.
 
+### 5. An ApRES time series, one visit a year
+
+Examples 1-4 ask what is down there. Examples 5 and 6 ask what the ice is
+*doing*. One chirp goes into a firn/ice column carrying ordinary meteoric
+stratigraphy and the record is kept; the column is deformed by a year of
+`radarwave.VerticalStrain` and the identical chirp is transmitted again. Five
+visits, four years. The difference between consecutive range-compressed
+records - a phase per echo, and so an apparent motion per layer - is the
+measurement, and it is good to under a centimetre out of motions of tens of
+centimetres.
+
+**Why a series and not a pair.** A pair shows that the phase carries the motion.
+A series shows the two things a pair cannot. The motion *accumulates*: by year
+four the shallowest markers have moved close to two metres, several resolution
+cells and six or seven fringes, so following one marker means tracking it
+through steps that each move it more than a resolution cell. And the phase wraps
+repeatedly on the way, so the measurement only holds together if every wrap is
+accounted for - which is what a real ApRES deployment, recording for a season
+and processed pair by pair, has to do. Consecutive pairs rather than everything
+against year zero, for the same reason: against year zero the interferogram
+would have decorrelated and the unwrap would have nothing to hold on to.
+
+**The deformation.** Two terms move a marker in the depth-below-surface
+coordinate a surface-referenced radar works in, and they pull opposite ways.
+*Burial*: snow accumulates and the firn beneath compacts, so a marker sinks at
+`b / rho_rel(z)` per year - 0.57 m/yr at the surface, 0.22 m/yr in solid ice,
+entirely a firn effect and strongly depth-dependent. *Dynamic thinning*: a
+vertical strain rate shortens the column above the marker by `eps_zz * z` per
+year, lifting it back towards the surface, linear in depth and the term
+glaciology wants. At 0.20 m/yr accumulation and `eps_zz = -4e-3` /yr they
+balance at about 72 m: shallow markers sink half a metre over the year, deep
+ones rise a third of one, and the apparent motion changes sign in between.
+That sign change is the signature - a timing error, a repositioned antenna or a
+tide lifting the whole column cannot imitate it, because none of them is a
+function of depth.
+
+The firn column is treated as being in steady state, so the mean density field,
+the wave speed and the snow surface are identical at both epochs and only the
+material markers move through them. That is what makes the two records
+comparable: every difference between them is deformation. A transient firn
+column would change the velocity structure too, and a real repeat sounding
+cannot separate that from deformation without an independent constraint;
+nothing here models it.
+
+**Why a chirp.** This is the first example that cannot use an impulse. The
+displacement is read off `-2 pi f_c dtau`, and that expression needs an `f_c`;
+an impulse whose instantaneous frequency wanders across an octave does not have
+one. The source is a linear-FM chirp across the real ApRES band, 200-400 MHz,
+and two numbers follow from that band and set everything the example shows:
+the range resolution `c / (2 B sqrt(eps))` = 0.42 m (0.70 m once the Blackman
+band window is applied), and the fringe spacing `c / (2 f_c sqrt(eps))` = 28.1
+cm, which is how far a layer must move to turn the phase once.
+
+The chirp simulated is 100 ns rather than the instrument's 1 s: deramp on
+receive needs a sweep far longer than the two-way time to the deepest target,
+and an FDTD record is microseconds long. The *band* is the instrument's, so the
+compressed wavelet, the resolution and the sidelobes are too. What is not
+reproduced is the time-bandwidth product, and with it the SNR gain the long
+sweep exists for - and these traces carry no noise for it to improve.
+`radarwave/waveform.py` carries the deramp chain as well as the matched filter,
+and the tests check that the two return the same range profile and the same
+differential phase rather than asserting it.
+
+**How the motion is recovered**, per consecutive pair, which is the ApRES chain
+and what `+vdef` (`~/projects/radar_velocity`) does to the EAGER repeat passes:
+find every echo in the earlier record, cross-correlate the later envelope
+against it, unwrap the interferometric phase along depth, fix the one remaining
+whole-fringe ambiguity from the envelope estimates, read the range change off
+the phase, and chain echoes from step to step into marker trajectories. The
+envelope's job is that ambiguity and nothing else. It has to be right to half a
+fringe to do it - 14 cm at 300 MHz, 5.6 cm at 750 - and both examples print how
+close it came, because that margin is what fails first when a band is pushed up.
+Tracking drops a marker whose predicted position has no echo near it rather than
+matching it to the nearest thing available: chaining onto the wrong reflector
+does not look like an error afterwards, it looks like a layer that moved several
+metres in a year.
+
+**What the two runs measured.** Both sound the identical column and
+deformation; they differ only in the band.
+
+| | ApRES, 200-400 MHz | accum3, 600-900 MHz |
+| --- | --- | --- |
+| domain sounded | 140 m | 60 m |
+| echoes found | 22, over 3-94 m | 10, over 4-39 m |
+| markers followed through all five visits | 20 | 6 |
+| phase turned per year, across the record | 2.1 | 1.9 |
+| apparent motion per year-step | **0.69 cm rms** (85 measurements) | **0.84 cm rms** (38) |
+| cumulative motion after 4 years | 2.70 cm rms, out of 24-205 cm | 2.42 cm rms, out of 90-207 cm |
+| envelope estimate | 2.27 cm rms, worst 6.11 | 3.77 cm rms, worst 10.75 |
+| envelope estimates outside the half-fringe | **0 of 85** (bar 14.0 cm) | **5 of 38** (bar 5.6 cm) |
+
+The last row is the trade, measured. accum3's fringe is 2.5x tighter, so its
+whole-fringe ambiguity is 2.5x harder to resolve, and individual envelope
+estimates *do* cross the bar. What saves it is that the fringe integer is chosen
+once per profile from the **median** of the per-echo estimates rather than per
+echo - a handful of bad ones then cost nothing, where a biased majority would
+cost a whole fringe. That is a design choice worth knowing about before pushing
+a repeat-pass measurement to a higher band.
+
+**The per-step errors do not average down.** Each year-step is recovered to
+about 0.7 cm rms, but the cumulative motion after four steps is out by 2.7 cm,
+not the 1.4 cm independent errors would give - it is very close to the 2.7 cm a
+*per-reflector* offset repeating at every step produces (accum3: 2.42 cm
+measured, 1.68 independent, 3.37 fully correlated). Each
+echo has its own small persistent error, set by its own local geometry and where
+it happens to fall on the grid, and that error is the same every year. Worth
+knowing before quoting a precision for a season-long record: the scatter between
+reflectors is what averages down, the offset of any one of them does not.
+
+**No movie**, deliberately, unlike the other four. The medium is identical at
+every epoch, so consecutive wavefields differ by less than a metre in 140, which
+is under a pixel; there is nothing to watch. The four figures are the pulse
+itself (`pulse.png`), the records and the phase between them (`record.png`), the
+recovered apparent motion against the imposed profile at every step
+(`motion.png`), and the marker trajectories beside the wrapping phase the radar
+actually reads (`series.png`).
+
+Three things had to be got right before any of this measured anything, and each
+is worth more than its line count:
+
+* **Sub-cell layer positions.** A hard-edged layer can only sit on a grid node,
+  so displacing it by less than a cell displaces it by zero or by a whole cell.
+  At 3.5 cm cells that quantisation is up to a radian of phase, larger than
+  much of the signal. `Layer.edge_width` ramps the edges over a couple of cells
+  so the sampled profile's centroid follows the requested depth continuously.
+* **A layerless twin.** The layer echoes run 85-92 dB below the transmit pulse,
+  and the wake a 2-D line source leaves behind itself sits near -95 dB, so an
+  echo stands only 5-10 dB above something that did not move. Subtracting a
+  no-layer twin of the same column from both epochs cut the phase error from
+  5.3 cm to 0.7 cm on a 42 m test column. It is one twin for both epochs,
+  because the background is exactly what does not change.
+* **The coarse estimator.** `subsample_lag` fits a parabola to the correlation
+  peak, which is right for the zero-mean correlations it was written for and
+  wrong for a one-signed compressed envelope: the mean removal digs a pedestal
+  and pulls the vertex towards zero lag by several centimetres, a third of an
+  ApRES fringe and most of an accum3 one. `upsampled_lag` interpolates the
+  correlation instead, which is what `vdef.coalignPair` does. The window
+  matters as much as the estimator - it has to be several times the compressed
+  wavelet or the shifted copy is truncated asymmetrically, and shorter than the
+  reflector spacing or it measures two layers at once.
+* **Telling an echo from structure on one.** A compressed echo is a wavelet, not
+  a spike, and peak-finding on amplitude alone returns half again to twice as
+  many "echoes" as there are layers - each extra one carrying its parent's phase
+  rather than a phase of its own, which is what turns a one-centimetre
+  measurement into a five-centimetre one at 750 MHz. A peak is kept only if it
+  is within 10 dB of the strongest sample within six resolution cells. That is
+  conservative on purpose: it throws away a genuine reflector that happens to be
+  10 dB weaker than a close neighbour, which costs one point on a profile of
+  twenty, where a retained sidelobe puts a *wrong* point on it and nothing
+  downstream can tell which it was.
+
+### 6. The same series in the EAGER accum3 band
+
+The same column, the same deformation, the same five visits and the same
+processing, all imported from example 5, sounded with the CReSIS/OPR
+accumulation radar instead: 600-900 MHz in survey mode, from
+`default_radar_params_2022_Antarctica_Ground_accum.m`, the configuration run on
+the 2022_Antarctica_Ground traverse at Windless Bight whose repeat passes the
+EAGER vertical-deformation product is built from. The only thing that differs
+between the two examples is the band, which is what makes the pair a comparison
+of waveforms rather than of two experiments that happen to resemble each other.
+
+| | ApRES | accum3 |
+| --- | --- | --- |
+| band | 200-400 MHz | 600-900 MHz |
+| range resolution in ice | 0.42 m (0.70 m windowed) | 0.28 m (0.46 m windowed) |
+| one turn of phase | 28.1 cm | 11.2 cm |
+
+accum3 separates two reflectors half again as finely and reads a given motion
+with two and a half times the phase - and wraps two and a half times as often
+doing it. Both show up here. The finer resolution splits some firn bands into
+their top and bottom interfaces, which ApRES sees as a single echo. The tighter
+fringe means the envelope estimate that resolves the whole-fringe ambiguity has
+to stay inside 5.6 cm rather than ApRES's 14 cm. More fringes is more signal only
+for as long as they can still be counted, and that is the trade a campaign is
+making when it chooses a band rather than maximising one.
+
+The domain is shallower and has to be: resolving 900 MHz in ice needs a 1.6 cm
+cell against ApRES's 3.5 cm, so the same depth would cost about five times the
+cell-updates. The instrument does not reach that far anyway - an accumulation
+radar is a firn instrument and the EAGER strain result is quoted over the top
+100 m - so this example sounds 60 m rather than 140. The sign change at 72 m is
+below that, so every marker here is sinking: what accum3 sees is the top,
+steepest part of the same curve, in finer detail.
+
 ## Package layout
 
 ```
@@ -314,6 +543,8 @@ radarwave/
   scenes.py       building 2-D ice models: layers, dipping surfaces, fabric domains
   polarimetry.py  interferograms, delays, fabric inversion
   sources.py      source wavelets
+  waveform.py     chirped radar systems, range compression, FMCW deramp
+  deform.py       Lagrangian vertical strain between two repeat soundings
   viz.py          talk-quality figures and MP4 wavefield movies
   constants.py    physical constants
 ```
@@ -397,7 +628,22 @@ from. Beyond that:
 * that `--bare` reaches inset axes and figure-level legends while leaving the
   axis labels, tick numbers and colourbar text a slide still needs;
 * that a snapshot cache written from one model is refused by another, naming the
-  parameter that moved.
+  parameter that moved;
+* the chirped chain examples 5 and 6 run on: that a compressed echo lands at its
+  own two-way time with no wavelet offset, that the phase between two compressed
+  profiles is exactly `-2 pi f_c dtau`, that the FMCW deramp chain and the
+  matched filter return the same delay and the same differential phase, and that
+  the whole repeat-pass recovery - synthesise a pair from a known deformation,
+  find the echoes, resolve the fringe, read the phase - returns the deformation
+  it was given across more than a full fringe of motion;
+* that a ramped layer edge tracks a sub-cell displacement where a hard-edged one
+  quantises, and that `edge_width = 0` reproduces the old hard mask node for
+  node;
+* that `upsampled_lag` is unbiased on a compressed envelope where the parabolic
+  `subsample_lag` is not;
+* that a sampled deformation trajectory is the same path as integrating straight
+  to each time, and that marker tracking chains reflectors across a series and
+  drops one it cannot match rather than chaining onto its neighbour.
 
 Beyond the test suite, `validation/` holds cross-code checks against tools the
 package deliberately does not depend on: `thin_layer_check.py` scores the

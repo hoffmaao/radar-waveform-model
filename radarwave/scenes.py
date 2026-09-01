@@ -44,6 +44,7 @@ def conformal_layering(
     thickness_ice=(0.8, 1.4),
     amplitude=(1.4, 4.0),
     wavelengths=(300.0, 95.0),
+    edge_width=0.0,
     exclude=None,
 ):
     """Meteoric internal layering that is conformable with the surface.
@@ -68,6 +69,11 @@ def conformal_layering(
         seed gives the same stratigraphy, so two models can share it.
     amplitude : (float, float)
         Undulation amplitude at the surface, and its increase per 250 m.
+    edge_width : float
+        Passed to every :class:`Layer`.  Ramping the layer edges is what lets a
+        layer sit between grid nodes; see :class:`Layer`.  Callers that measure
+        a sub-cell displacement want a couple of cells here, and everything
+        else wants the default of zero.
     exclude : (float, float) or sequence of them, optional
         Depth bands to leave clear of layers.  A layer whose two-way time
         coincides with the event an example is about puts its own wavelet on
@@ -107,12 +113,13 @@ def conformal_layering(
             layer = Layer(
                 depth=depth, thickness=rng.uniform(*thickness_firn),
                 d_rho=rng.choice([-1.0, 1.0]) * rng.uniform(*d_rho),
-                undulations=undul)
+                undulations=undul, edge_width=edge_width)
             step = rng.uniform(*firn_spacing)
         else:
             layer = Layer(
                 depth=depth, thickness=rng.uniform(*thickness_ice),
-                sigma_factor=rng.uniform(*sigma_factor), undulations=undul)
+                sigma_factor=rng.uniform(*sigma_factor), undulations=undul,
+                edge_width=edge_width)
             step = rng.uniform(*ice_spacing)
         if not any(lo <= depth <= hi for lo, hi in bands):
             layers.append(layer)
@@ -161,6 +168,20 @@ class Layer:
     undulations : sequence
         ``(amplitude_m, wavelength_m, phase_rad)`` triples summed into the
         layer geometry.
+    edge_width : float
+        Width (m) over which the layer's edges are ramped instead of stepped.
+        Zero, the default, gives the hard mask.
+
+        This matters for one thing only, and it matters a great deal for that
+        one thing: where the layer *effectively* sits between grid nodes.  A
+        hard mask can only put an edge on a node, so moving a layer by less
+        than a cell moves it by either zero or a whole cell, and a
+        phase-sensitive experiment reading a sub-centimetre displacement off a
+        3.5 cm grid then measures the quantisation instead of the ice.  Ramping
+        the edge over two or three cells lets the sampled profile's centroid
+        track the requested depth continuously.  It is not free - a gradational
+        interface reflects less than a sharp one, sharply so once the ramp
+        approaches a wavelength - so keep it to a small fraction of one.
     """
 
     depth: float
@@ -169,6 +190,7 @@ class Layer:
     sigma_factor: float = 1.0
     dip_deg: float = 0.0
     undulations: Sequence[Tuple[float, float, float]] = ()
+    edge_width: float = 0.0
 
     def depth_at(self, x, x0=0.0):
         return undulating_depth(x, self.depth, self.undulations, self.dip_deg, x0)
@@ -216,6 +238,25 @@ class IceModelBuilder:
         centre = layer.depth_at(self.grid.x)[:, None]
         return np.abs(self.depth - centre) <= layer.thickness / 2.0
 
+    def layer_weight(self, layer: Layer) -> np.ndarray:
+        """Fractional presence of ``layer`` at every node, in ``[0, 1]``.
+
+        The hard mask when ``edge_width`` is zero, so nothing that does not ask
+        for a ramp gets one; a raised cosine across ``edge_width``, centred on
+        the nominal edge, when it is not.  Raised cosine rather than linear so
+        the profile has a continuous derivative and the ramp does not itself
+        act as two weak interfaces.
+        """
+        if not layer.edge_width:
+            return self.layer_mask(layer).astype(float)
+        centre = layer.depth_at(self.grid.x)[:, None]
+        offset = np.abs(self.depth - centre)
+        ramp = np.clip(
+            (layer.thickness / 2.0 + layer.edge_width / 2.0 - offset) / layer.edge_width,
+            0.0, 1.0,
+        )
+        return 0.5 * (1.0 - np.cos(np.pi * ramp))
+
     def below_mask(self, depth_fn) -> np.ndarray:
         """Mask of everything below a surface ``depth_fn(x) -> depth``."""
         boundary = np.asarray(depth_fn(self.grid.x), dtype=float)[:, None]
@@ -224,11 +265,11 @@ class IceModelBuilder:
     # -- editing ----------------------------------------------------------
 
     def add_layer(self, layer: Layer) -> "IceModelBuilder":
-        mask = self.layer_mask(layer) & ~self.is_air
+        w = self.layer_weight(layer) * ~self.is_air
         if layer.d_rho:
-            self.rho[mask] = np.clip(self.rho[mask] + layer.d_rho, 0.05, 1.0)
+            self.rho = np.clip(self.rho + layer.d_rho * w, 0.05, 1.0)
         if layer.sigma_factor != 1.0:
-            self.sigma_factor[mask] *= layer.sigma_factor
+            self.sigma_factor = self.sigma_factor * (1.0 + (layer.sigma_factor - 1.0) * w)
         return self
 
     def add_layers(self, layers: Sequence[Layer]) -> "IceModelBuilder":

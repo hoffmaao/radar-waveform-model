@@ -367,7 +367,7 @@ def geometry_figure(model, boundary, period, px, pz, bare):
                  (0.03, 0.985), xycoords="axes fraction", va="top", fontsize=9)
     ax2.set_ylim(svec[-1], svec[0])
     ax2.set_xlabel("relative permittivity")
-    ax2.set_ylabel("distance along the interface normal (m)")
+    ax2.set_ylabel("normal distance (m)")
     ax2.set_title("the profile the wave meets", loc="left")
     ax2.grid(alpha=0.25)
     ax2.legend(fontsize=9, loc="lower left")
@@ -516,9 +516,15 @@ def main(quick=False, render_only=False, bare=False, out=None):
                "guides": [t_pred],
                "tlim": float(t_rec[-1]),
                "xlim": (-125.0, 5.0),
-               "xlabel": "matched-filtered return\n(dB re. compressed transmit pulse)",
+               # Two words and a unit: a movie frame is grabbed from the canvas,
+               # so an over-long label is cut off rather than fitted.  The
+               # reference is the compressed transmit pulse, as everywhere else.
+               "xlabel": "compressed return (dB)",
                "title": "received at the antenna, pulse-compressed"},
-        title=f"A banded fabric package at {DIP_DEG:.0f} degrees",
+        # No title on this one: it goes on a slide that carries its own
+        # heading, and a second one competing with it is noise.  The subtitle
+        # stays, because it holds the numbers the frame cannot be read without.
+        title="",
         subtitle=(f"{N_BANDS} bands at the Bragg period for {FC_ON/1e6:.0f} MHz, "
                   f"sounded with a {NARROWBAND_BW*100:.0f} percent-bandwidth "
                   "wavelet (the post-compression band of a real system). "
@@ -560,7 +566,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
     ax.axhline(t_pred * 1e6, color="#111", ls=":", lw=1.0)
     ax.set_xlim(-140, -60)
     ax.set_ylim(t_rec[-1] * 1e6, 0)
-    ax.set_xlabel("matched-filtered return\n(dB re. compressed transmit pulse)")
+    ax.set_xlabel("compressed return (dB)")
     ax.set_ylabel("two-way time (us)")
     ax.set_title("same package, two pulses, after pulse compression", loc="left")
     ax.annotate("off-resonance level is a floor set by the\n"

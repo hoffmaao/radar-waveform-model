@@ -18,6 +18,7 @@ __all__ = [
     "delay_from_phase",
     "dlambda_from_delay",
     "subsample_lag",
+    "upsampled_lag",
     "isolate_arrival",
     "synthetic_pair",
 ]
@@ -45,6 +46,41 @@ def subsample_lag(a, b, dt):
         if denom != 0.0:
             lag += 0.5 * (cc[k - 1] - cc[k + 1]) / denom
     return lag * dt
+
+
+def upsampled_lag(a, b, dt, factor=16):
+    """Lag of ``b`` relative to ``a`` (s), from an FFT-upsampled correlation.
+
+    :func:`subsample_lag` refines the correlation peak with a parabola through
+    three samples, which is right for the sharp, zero-mean, two-sided
+    correlations it was written for.  It is wrong for a range-compressed
+    *envelope*: an envelope is one-signed, so the mean subtraction that makes a
+    parabolic fit well behaved instead digs a pedestal either side of the peak
+    and pulls the fitted vertex towards zero lag.  Measured on the repeat pairs
+    of example 5 that bias runs to several centimetres of range, which is a
+    third of a fringe at 300 MHz and most of one at 750.
+
+    Interpolating the correlation itself - zero-padding its spectrum, which is
+    exact for a band-limited signal - has no such bias.  It is also what
+    ``vdef.coalignPair`` does to coregister the EAGER repeat passes, at 32x.
+
+    Note what this does *not* fix: the window.  A correlation window has to be
+    several times the compressed wavelet or the shifted copy is truncated
+    asymmetrically and the estimate is dragged towards zero anyway, and it has
+    to be shorter than the spacing of the reflectors or it measures two of them
+    at once.  Both are the caller's problem.
+    """
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    n = 1 << int(np.ceil(np.log2(max(a.size, 2) * 2)))
+    spec = np.fft.fft(b, n) * np.conj(np.fft.fft(a, n))
+    up = int(max(factor, 1))
+    padded = np.zeros(n * up, dtype=complex)
+    padded[: n // 2] = spec[: n // 2]
+    padded[-(n // 2):] = spec[n // 2:]
+    cc = np.abs(np.fft.ifft(padded))
+    cc = np.roll(cc, cc.size // 2)
+    return float(int(np.argmax(cc)) - cc.size // 2) * dt / up
 
 
 def isolate_arrival(t, traces, t0, halfwidth, taper=True):
