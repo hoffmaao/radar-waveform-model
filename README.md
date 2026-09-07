@@ -339,9 +339,16 @@ background conductivity, spaced 16-26 m, which gives 21 horizons between
 close-off and the floor. Nothing is excluded. Example 3 clears a band of layers
 around its event because there the transition and the layering come back within
 a few dB of each other, whereas here the package returns **+18.5 dB** above the
-brightest deep horizon (-73.4 against -92.0 dB in the record), so a coincident
+brightest deep horizon (-73.5 against -92.0 dB in the record), so a coincident
 horizon cannot hide it - and a gap cut in the stratigraphy exactly where the
-answer is would be the first thing to distrust. The movie draws every horizon
+answer is would be the first thing to distrust. The stratigraphy does put one
+horizon at the package's own two-way time: 346.4 m under the antenna, arriving
+81.7 ns before it, unresolved inside the compressed wavelet. It comes back
+-107.2 dB, 33.7 dB below the package, and moves the measured package level by
+0.1 dB. Each side of the margin is measured on the record that holds it alone -
+the package on the twin difference, the horizons on the package-free twin's own
+gather - so the search for the brightest horizon runs to the floor of the record
+and includes that coincident one rather than stopping short of the event. The movie draws every horizon
 over the wavefield, with the package outline heavy over them, and marks each
 horizon's two-way time on the trace, so the record reads as a train of nadir
 echoes with a single arrival that belongs to none of them.

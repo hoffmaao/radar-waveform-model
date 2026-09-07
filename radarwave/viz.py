@@ -378,10 +378,10 @@ def wavefield_movie(
                 vmin=lo, vmax=hi + 0.35 * (hi - lo or 1.0),
             )
         for line in contours or []:
-            style = dict(color=ANNOT, lw=0.7, alpha=0.35)
+            style = dict(color=ANNOT, lw=0.7, alpha=0.35, zorder=1)
             if len(line) > 2:
                 style.update(line[2])
-            ax.plot(line[0], line[1], zorder=1, **style)
+            ax.plot(line[0], line[1], **style)
         images.append(ax.imshow(rgba_frame(stack, vmax, 0), extent=extent,
                                 aspect="auto" if follow else "equal", zorder=2))
         for ax_, az_, text in annotations or []:

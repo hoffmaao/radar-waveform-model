@@ -445,6 +445,16 @@ def main(quick=False, render_only=False, bare=False, out=None):
         "band_period": round(period, 6), "band_edge_width": BAND_EDGE_WIDTH,
         "npml": NPML, "z_ant": Z_ANT, "src_x": SRC_X, "dip_deg": DIP_DEG,
         "depth_at_x0": DEPTH_AT_X0,
+        # Covers what this example overrides, not the rest of
+        # ``conformal_layering``'s signature (seed, top, firn_base,
+        # firn_spacing, thicknesses, amplitude, wavelengths): editing one of
+        # those still re-uses a cache built from different stratigraphy.  The
+        # gap is pre-existing and repo-wide -- ex01 and ex03 stamp nothing of
+        # their layering at all -- and this entry narrows it rather than
+        # opening it.  The complete fix is to stamp the derived layer geometry
+        # (rounded depths and sigma factors) instead of the call arguments,
+        # which invalidates the 2.3 GB cache here and costs a ~2.5 h re-run; do
+        # it whenever a rebuild is being paid for anyway.
         "layering": LAYERING,
         "fabric_above": ABOVE, "fabric_below": BELOW,
         "column": stampable(COLUMN),
@@ -550,18 +560,31 @@ def main(quick=False, render_only=False, bare=False, out=None):
     rec_mf = matched_filter(recorded["on"], kernels["on"])
 
     # What the record shows, as against what the twin difference isolates.  The
-    # compressed trace carries the nadir layering too, and the margin between
-    # the brightest deep horizon and the package is the point of the picture, so
-    # it is measured off the same trace the movie draws rather than asserted.
-    # The window stops short of the package so a sidelobe of the package's own
-    # compressed wavelet cannot be counted as a layer.
+    # margin between the package and the nadir layering is the point of the
+    # picture, so it is measured off the same compressed trace the movie draws
+    # rather than asserted -- but each side is measured on the record that
+    # contains it alone.  ``traces['on']`` is banded minus twin, so the package
+    # sits there with no layering; ``recorded['on'] - traces['on']`` is the
+    # package-free twin's own gather, so every horizon sits there with no
+    # package.  Measuring the layering on the twin means the search needs no
+    # upper cut to keep the package's compressed sidelobes out, which is what
+    # lets it run to the floor of the record and include the horizons that
+    # coincide with the package.  Those are the ones a viewer would suspect of
+    # hiding it, and they are 30-odd dB down: the direct evidence for laying
+    # this column with no exclusion gap.
     rec_env = np.abs(analytic(rec_mf))
     rec_ref = float(np.max(rec_env))
-    lay_win = (t_rec > 2.0e-6) & (t_rec < t_pred - 0.2e-6)
-    lay_db = 20 * np.log10(float(np.max(rec_env[lay_win])) / rec_ref)
-    pkg_db = 20 * np.log10(float(np.max(rec_env[win])) / rec_ref)
+    pkg_env = np.abs(analytic(matched_filter(traces["on"], kernels["on"])))
+    twin_env = np.abs(analytic(
+        matched_filter(recorded["on"] - traces["on"], kernels["on"])))
+    deep = t_rec > 2.0e-6
+    pkg_db = 20 * np.log10(float(np.max(pkg_env[win])) / rec_ref)
+    lay_db = 20 * np.log10(float(np.max(twin_env[deep])) / rec_ref)
+    coin_db = 20 * np.log10(float(np.max(twin_env[win])) / rec_ref)
     print(f"  in the record: package {pkg_db:.1f} dB, brightest deep nadir "
           f"horizon {lay_db:.1f} dB, margin {pkg_db - lay_db:+.1f} dB")
+    print(f"  horizon coincident with the package {coin_db:.1f} dB, "
+          f"margin {pkg_db - coin_db:+.1f} dB")
 
     # Two kinds of reflector in one frame, so the frame has to tell them apart:
     # the conformable horizons faint, the package outline heavy and in the same
