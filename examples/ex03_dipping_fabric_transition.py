@@ -160,8 +160,10 @@ def layer_exclusion(column, zlim, x_antenna=0.0, dip_deg=None, depth_at_x0=None)
     transition does?  Not the transition's own depth: the specular ray leaves
     at the dip angle, so it images at its perpendicular range.  Invert the
     column's own two-way time rather than dividing by a nominal velocity, so
-    the firn is accounted for.  Shared with ex04, whose banded package images
-    from its own specular point at its own dip.
+    the firn is accounted for.  The dip and depth are arguments rather than the
+    module constants so a caller sounding the same shape at another geometry
+    can ask for its own band; ex04, which used to, now keeps its stratigraphy
+    unbroken because its package returns clear of the brightest horizon.
 
     Returns ``(d_event, (lo, hi))``.
     """

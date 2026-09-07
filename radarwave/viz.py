@@ -259,8 +259,13 @@ def wavefield_movie(
         of anything that matters.
     background : (nx, nz) array, optional
         A static field (typically permittivity) drawn underneath the wave.
-    contours : sequence of (x_array, z_array) pairs, optional
+    contours : sequence of (x_array, z_array) or (x_array, z_array, style)
         Polylines drawn over every frame, e.g. layer or interface geometry.
+        The optional third element is a mapping of line keywords merged over the
+        faint default.  That is what lets one call draw a background
+        stratigraphy and the one interface the scene is about without the two
+        reading alike -- thirty layer traces in the default grey would bury a
+        package outline drawn in the same grey.
     annotations : sequence of (x, z, text) tuples, optional
     follow : dict, optional
         ``{"speed": m/s, "window": m, "start": m}``.  Scrolls the depth axis
@@ -373,7 +378,10 @@ def wavefield_movie(
                 vmin=lo, vmax=hi + 0.35 * (hi - lo or 1.0),
             )
         for line in contours or []:
-            ax.plot(line[0], line[1], color=ANNOT, lw=0.7, alpha=0.35, zorder=1)
+            style = dict(color=ANNOT, lw=0.7, alpha=0.35)
+            if len(line) > 2:
+                style.update(line[2])
+            ax.plot(line[0], line[1], zorder=1, **style)
         images.append(ax.imshow(rgba_frame(stack, vmax, 0), extent=extent,
                                 aspect="auto" if follow else "equal", zorder=2))
         for ax_, az_, text in annotations or []:

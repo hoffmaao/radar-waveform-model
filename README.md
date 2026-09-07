@@ -32,7 +32,7 @@ with time.
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest                       # 102 tests, a few minutes
+pytest                       # 103 tests, a few minutes
 ```
 
 ## The six examples
@@ -314,27 +314,47 @@ of the same contrast as example 3's single transition lift the response by
 roughly `20 log10(2N)` at resonance, from about -54 dB to about -22 dB,
 competitive with the brightest density layering anywhere in the column.
 
-The package carries example 3's layering, fabrics and twin-difference
-processing, but its own geometry: deeper and gentler, dipping at 12 degrees and
-crossing 350 m below the surface at the centre of the domain. Dip and depth move
-together, because the specular point sits `h sin(delta) cos(delta)` updip of the
-antenna - at example 3's 35 degrees a 350 m package would return from 165 m
-off-axis, outside any affordable domain, while at 12 degrees it returns from
-about 71 m. The transmitter is offset 55 m right of centre, which stretches that
-ray across the frame and puts the specular point - 19 m left of centre, at 346 m
-depth - well clear of the domain edge, with the return arriving past 4 us and
-clear of the shallow layering. `geometry.png` draws the scene, the specular ray
-and the permittivity profile the wave meets, with an inset on the bands
-themselves: 1.4 m apart, and invisible at domain scale.
+The package carries example 3's fabrics and twin-difference processing, but its
+own geometry: deeper and gentler, dipping at 12 degrees and crossing 350 m below
+the surface at the centre of the domain. Dip and depth move together, because
+the specular point sits `h sin(delta) cos(delta)` updip of the antenna - at
+example 3's 35 degrees a 350 m package would return from 165 m off-axis, outside
+any affordable domain, while at 12 degrees it returns from about 71 m. The
+transmitter is offset 55 m right of centre, which stretches that ray across the
+frame and puts the specular point - 19 m left of centre, at 346 m depth - well
+clear of the domain edge, with the return arriving past 4 us and clear of the
+shallow layering. `geometry.png` draws the scene, the specular ray and the
+permittivity profile the wave meets, with an inset on the bands themselves:
+1.4 m apart, and invisible at domain scale.
+
+The package is not alone in the column, and the other half of the picture is
+what it is read against. Conformable meteoric layering runs from the firn to the
+floor of the domain: flat horizons whose specular return comes straight back
+from nadir, against one tilted package whose return comes from 71 m off to the
+side. That is what a radargram is normally made of, so the record has to carry
+both. Below firn close-off the horizons are acidity - conductivity - contrasts,
+because density banding contributes essentially nothing there, and this example
+asks for stronger ones than the shallower examples need: 4 to 9 times the
+background conductivity, spaced 16-26 m, which gives 21 horizons between
+close-off and the floor. Nothing is excluded. Example 3 clears a band of layers
+around its event because there the transition and the layering come back within
+a few dB of each other, whereas here the package returns **+18.5 dB** above the
+brightest deep horizon (-73.4 against -92.0 dB in the record), so a coincident
+horizon cannot hide it - and a gap cut in the stratigraphy exactly where the
+answer is would be the first thing to distrust. The movie draws every horizon
+over the wavefield, with the package outline heavy over them, and marks each
+horizon's two-way time on the trace, so the record reads as a train of nadir
+echoes with a single arrival that belongs to none of them.
 
 The resonance is the fingerprint. The same 20-band package is sounded at two
 pulse frequencies: 60 MHz, where the banding is tuned, and 45 MHz, a
 quarter-octave below. On resonance the return is bright; off it, it
-collapses. The measured on/off contrast is **+19.6 dB** against +20.7 dB from
+collapses. The measured on/off contrast is **+19.5 dB** against +20.7 dB from
 the transfer matrix - a lower bound, since the off-resonance window sits on
-the deep-layer transmission-residual floor rather than on silence. A reflector
-that appears in one frequency band and vanishes in another is banded fabric;
-nothing else in the reflectivity budget does that.
+the deep-layer transmission-residual floor rather than on silence, and
+brightening the deep horizons raises that floor rather than the signal. A
+reflector that appears in one frequency band and vanishes in another is banded
+fabric; nothing else in the reflectivity budget does that.
 
 Two presentation choices are deliberate. The transmitted wavelet is a
 narrowband (12 percent) Gabor rather than the broadband impulse the other
@@ -347,6 +367,17 @@ trace panel, are shown pulse-compressed - correlated with the transmit
 wavelet - so every echo wears the zero-phase autocorrelation shape a
 processed radar product shows; on these noise-free traces that is a display
 transform, not an SNR gain.
+
+The figures carry no words beyond their labels: no titles, no captions, no
+callouts, and every axis label is two words plus a unit wherever the quantity
+has one - relative permittivity is a ratio and gets none. What a caption would
+have said is here and in the module docstring instead. One thing the panel
+therefore cannot show is the nadir horizons' own reflections - they come back
+around 70 dB under the incident field, which is where the two-dimensional line
+source's wake also sits, so every opacity that reveals a horizon reveals the
+wake with it and the frame turns to speckle. The wavefield panel carries the
+geometry, and the trace panel, which has the dynamic range for it, carries the
+returns.
 
 ### 5. An ApRES time series, one visit a year
 

@@ -18,13 +18,27 @@ The resonance is the fingerprint.  The same package is run at two pulse
 frequencies: on resonance the return is bright; a quarter-octave away it
 collapses by tens of dB.  A reflector that appears in one band and vanishes in
 another is banded fabric -- nothing else in the reflectivity budget does that.
+The measured on/off contrast is a lower bound rather than the whole collapse:
+the off-resonance window does not sit on silence but on a floor set by the deep
+layering's transmission residual, since the two models differ in velocity below
+the package and their deep echoes do not subtract out.
 
-Layering, fabrics and processing are ex03's, imported from it, but the geometry
-is this example's own: the package dips at 12 degrees and crosses 350 m at
-x = 0, through the same conformable stratigraphy, and the return is isolated
-the same way, by differencing against a package-free twin.  The banding is
-periodic in the PERPENDICULAR distance to the dipping plane, so the Bragg
-condition holds along the specular ray.
+Fabrics and processing are ex03's, imported from it, but the geometry is this
+example's own: the package dips at 12 degrees and crosses 350 m at x = 0, and
+the return is isolated the same way, by differencing against a package-free
+twin.  The banding is periodic in the PERPENDICULAR distance to the dipping
+plane, so the Bragg condition holds along the specular ray.
+
+The stratigraphy is this example's own too, and it is half the picture.  The
+package sits inside conformable meteoric layering that runs from the firn to
+the floor of the domain: flat-lying horizons whose specular return comes
+straight back from nadir.  They are the reference the banded package has to be
+read against, because they are what a radargram is normally made of.  The
+record then carries both kinds of reflector at once -- a train of nadir echoes
+down the whole column, and one brighter arrival that comes from 71 m off to the
+side -- and the movie draws the horizons over the wavefield so the geometry of
+the two is visible rather than inferred.  See :data:`LAYERING` for what the
+horizons are and why nothing here is excluded from them.
 
 The bright polarisation is modelled the same way as ex03, by feeding the
 out-of-plane solver ``eps_xx``, and carries the same caveat: that substitution
@@ -58,7 +72,6 @@ from ex03_dipping_fabric_transition import (
     ABOVE,
     BELOW,
     COLUMN,
-    LAYER_GAP_HALFWIDTH,
     NPML,
     Z_ANT,
     eigen_permittivity,
@@ -137,6 +150,35 @@ WAVELET_T0 = 3.5e-7
 #: profile the grid carries.
 BAND_EDGE_WIDTH = 0.15
 
+#: The conformable stratigraphy, given explicitly rather than left to
+#: :func:`conformal_layering`'s defaults.  Those defaults were set for ex01 and
+#: ex03, whose domains stop a couple of hundred metres down; this one runs to
+#: 560 m, and the nadir layering has to stay legible the whole way or the
+#: package has nothing to be read against over most of the record.  Two changes,
+#: and both are about the ice section, because below firn close-off density
+#: banding contributes essentially nothing and every deep horizon here is an
+#: acidity (conductivity) one:
+#:
+#: * ``sigma_factor`` 4-9 times the background rather than 2.5-3.5.  A volcanic
+#:   acid spike of that size is ordinary in an ECM profile.  A conductivity
+#:   horizon reflects on its *excess* over the background, so this roughly
+#:   triples the brightest horizons' contrast -- about 10 dB -- which is what
+#:   carries them clear of the display floor for the whole record.  The example
+#:   measures the brightest one and prints it against the package, so the margin
+#:   between the two is a number off the run rather than an assertion.
+#: * ``ice_spacing`` 16-26 m rather than 24-36 m, giving 21 horizons between
+#:   close-off and the floor of a 560 m domain instead of 15: enough for the
+#:   record to read as layering rather than as a handful of isolated events.
+#:
+#: Nothing is excluded.  ex03 clears a band of layers around its event because
+#: there the fabric transition and the layering are within a few dB of each
+#: other and a coincident layer would bury it; here the package comes back 18.5
+#: dB above the brightest deep horizon -- the margin the run prints -- so a
+#: layer at the same two-way time cannot hide it, and cutting a gap in the
+#: stratigraphy exactly where the answer is would be the one thing a viewer is
+#: entitled to be suspicious of.
+LAYERING = dict(sigma_factor=(4.0, 9.0), ice_spacing=(16.0, 26.0))
+
 
 def band_period():
     """Bragg period d = v / (2 f) for the bright polarisation's mean speed."""
@@ -182,8 +224,7 @@ def build_models(xlim, zlim, dx):
     def boundary(x):
         return dipping_depth(x, DEPTH_AT_X0, DIP_DEG)
 
-    d_event, exclude = ex03.layer_exclusion(column, zlim, SRC_X, DIP_DEG, DEPTH_AT_X0)
-    layers = conformal_layering(zlim[1], exclude=exclude)
+    layers = conformal_layering(zlim[1], **LAYERING)
 
     period = band_period()
     banded = IceModelBuilder(grid, column, surface=0.0, air=True)
@@ -209,7 +250,7 @@ def build_models(xlim, zlim, dx):
     twin.add_layers(layers)
 
     return (column, grid, banded.finalize(npml=NPML), twin.finalize(npml=NPML),
-            boundary, exclude, period)
+            boundary, layers, period)
 
 
 def stack_reflectivity(period, f):
@@ -284,7 +325,7 @@ def matched_filter(trace, wavelet):
     return np.correlate(np.asarray(trace, dtype=float), w, mode="same")
 
 
-def geometry_figure(model, boundary, period, px, pz, bare):
+def geometry_figure(model, boundary, layers, period, px, pz, bare):
     """The scene: where the bands are, where the return comes from, and the
     one-dimensional profile the resonance argument runs on.
 
@@ -321,9 +362,15 @@ def geometry_figure(model, boundary, period, px, pz, bare):
     lim = float(np.abs(dl).max()) or 1.0
     ax.imshow(dl[::2, ::2].T, extent=(x[0], x[-1], z[-1], z[0]),
               aspect="equal", cmap="PuOr", vmin=-lim, vmax=lim)
+    # The conformable horizons carry no fabric contrast, so they are invisible
+    # in the eps_xx - eps_yy field this panel draws; drawn as lines they show
+    # what the package is discordant with, which is the whole reason the scene
+    # is worth a panel.  Faint, and the package outline heavy over them.
+    for layer in layers:
+        ax.plot(x, layer.depth_at(x), color="#999", lw=0.5, alpha=0.55)
     top = boundary(x)
-    ax.plot(x, top, color="#555", lw=0.9)
-    ax.plot(x, top + package_thickness(period), color="#555", lw=0.9)
+    ax.plot(x, top, color="#555", lw=1.2)
+    ax.plot(x, top + package_thickness(period), color="#555", lw=1.2)
     ax.plot([SRC_X], [Z_ANT], marker="v", ms=11, color="k")
     ax.annotate("antenna", (SRC_X + 4.0, Z_ANT - 6.0), fontsize=10)
     ax.plot([SRC_X, px], [Z_ANT, pz], "r--", lw=1.4)
@@ -331,8 +378,6 @@ def geometry_figure(model, boundary, period, px, pz, bare):
     ax.annotate("specular point", (px + 6.0, pz - 8.0), fontsize=10, color="r")
     ax.set_xlabel("distance (m)")
     ax.set_ylabel("depth (m)")
-    ax.set_title(f"{N_BANDS} bands, period {period:.2f} m, dip {DIP_DEG:.0f} deg",
-                 loc="left")
 
     # The inset is where the figure earns its keep: at domain scale the
     # package is a featureless stripe, and the banding only exists here.  Its
@@ -340,7 +385,7 @@ def geometry_figure(model, boundary, period, px, pz, bare):
     # own proportions -- given a fraction of its own the inset would draw square
     # inside a taller slot and float free of the corner it is anchored to.  The
     # bottom left is the one corner of a downdip package that stays empty, so
-    # the zoom and its title sit clear of the bands and the ray.
+    # the zoom sits clear of the bands and the ray.
     ins_w = 0.46
     ins = ax.inset_axes([0.14, 0.03, ins_w, ins_w * scene_w / scene_h])
     ins.imshow(dl.T, extent=(x[0], x[-1], z[-1], z[0]), aspect="equal",
@@ -350,7 +395,6 @@ def geometry_figure(model, boundary, period, px, pz, bare):
     ins.set_ylim(pz + half, pz - half)
     ins.plot([px], [pz], "ro", ms=5)
     ins.tick_params(labelsize=7)
-    ins.set_title("the bands, at the specular point", fontsize=8.5, pad=2)
     ax.indicate_inset_zoom(ins, edgecolor="#333")
 
     svec = np.arange(-4.0, N_BANDS * period + 4.0, 0.02)
@@ -362,13 +406,12 @@ def geometry_figure(model, boundary, period, px, pz, bare):
         prof = ea[k] + (eb[k] - ea[k]) * frac
         ax2.plot(prof, svec, lw=1.3, color=colour, label=name)
     ax2.axhspan(0.0, N_BANDS * period, color="#eee", zorder=0)
-    ax2.annotate(f"period {period:.2f} m = half a wavelength at "
-                 f"{FC_ON/1e6:.0f} MHz",
-                 (0.03, 0.985), xycoords="axes fraction", va="top", fontsize=9)
     ax2.set_ylim(svec[-1], svec[0])
+    # Relative permittivity is a ratio and has no unit to give it.  Every other
+    # axis in these figures carries one; writing a placeholder on this one would
+    # be worse than leaving it, so it stays dimensionless and says so.
     ax2.set_xlabel("relative permittivity")
     ax2.set_ylabel("normal distance (m)")
-    ax2.set_title("the profile the wave meets", loc="left")
     ax2.grid(alpha=0.25)
     ax2.legend(fontsize=9, loc="lower left")
 
@@ -394,7 +437,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
     zlim = (-8.0, 560.0) if not quick else (-8.0, 430.0)
     t_end = 6.2e-6 if not quick else 5.2e-6
 
-    column, grid, banded, twin, boundary, exclude, period = build_models(xlim, zlim, dx)
+    column, grid, banded, twin, boundary, layers, period = build_models(xlim, zlim, dx)
     stamp = {
         "dx": dx, "xlim": xlim, "zlim": zlim, "t_end": t_end,
         "fc_on": FC_ON, "fc_off": FC_OFF, "n_bands": N_BANDS,
@@ -402,8 +445,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
         "band_period": round(period, 6), "band_edge_width": BAND_EDGE_WIDTH,
         "npml": NPML, "z_ant": Z_ANT, "src_x": SRC_X, "dip_deg": DIP_DEG,
         "depth_at_x0": DEPTH_AT_X0,
-        "layer_gap_halfwidth": LAYER_GAP_HALFWIDTH,
-        "layer_exclusion_band": tuple(round(b, 3) for b in exclude),
+        "layering": LAYERING,
         "fabric_above": ABOVE, "fabric_below": BELOW,
         "column": stampable(COLUMN),
     }
@@ -468,7 +510,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
     # any figure is written: a geometry.png from the current constants sitting
     # beside a movie and a resonance figure from the previous run is a set of
     # artifacts nothing on disk marks as mixed.
-    geometry_figure(banded, boundary, period, px, pz, bare)
+    geometry_figure(banded, boundary, layers, period, px, pz, bare)
 
     # ---- measurement: on/off-resonance level against the prediction --------
     t_pred = float(echo_time(column, pz, Z_ANT, t_wave["on"], dip_deg=DIP_DEG))
@@ -506,30 +548,65 @@ def main(quick=False, render_only=False, bare=False, out=None):
     # record up front and revealed progressively; near the reveal edge that
     # implies half a kernel of lookahead, invisible at movie frame rates.
     rec_mf = matched_filter(recorded["on"], kernels["on"])
+
+    # What the record shows, as against what the twin difference isolates.  The
+    # compressed trace carries the nadir layering too, and the margin between
+    # the brightest deep horizon and the package is the point of the picture, so
+    # it is measured off the same trace the movie draws rather than asserted.
+    # The window stops short of the package so a sidelobe of the package's own
+    # compressed wavelet cannot be counted as a layer.
+    rec_env = np.abs(analytic(rec_mf))
+    rec_ref = float(np.max(rec_env))
+    lay_win = (t_rec > 2.0e-6) & (t_rec < t_pred - 0.2e-6)
+    lay_db = 20 * np.log10(float(np.max(rec_env[lay_win])) / rec_ref)
+    pkg_db = 20 * np.log10(float(np.max(rec_env[win])) / rec_ref)
+    print(f"  in the record: package {pkg_db:.1f} dB, brightest deep nadir "
+          f"horizon {lay_db:.1f} dB, margin {pkg_db - lay_db:+.1f} dB")
+
+    # Two kinds of reflector in one frame, so the frame has to tell them apart:
+    # the conformable horizons faint, the package outline heavy and in the same
+    # near-black the trace panel marks the package with.  Horizons below the
+    # cropped panel are dropped rather than drawn off the axis.
+    #
+    # Drawn, not imaged: the horizons' own reflections cannot be shown in this
+    # panel, and lowering ``alpha_knee`` to reach them does not work.  They come
+    # back around 70 dB under the incident field, which is where the 2-D line
+    # source's wake also sits, so every opacity that reveals a horizon reveals
+    # the wake with it and the frame turns to speckle (tried at 0.006 and
+    # 0.0015).  The wavefield panel carries the geometry and the trace panel,
+    # which has the dynamic range for it, carries the returns.
+    layer_lines = [(grid.x, layer.depth_at(grid.x)) for layer in layers
+                   if layer.depth < sz[-1]]
+    package_style = dict(color="#111", lw=1.4, alpha=0.95)
+    layer_times = [float(echo_time(column, float(layer.depth_at(SRC_X)), Z_ANT,
+                                   t_wave["on"]))
+                   for layer in layers]
     wavefield_movie(
         OUT / "banded_fabric.mp4", panels[0][0], sx, sz, stimes,
-        contours=[(grid.x, boundary(grid.x)),
-                  (grid.x, boundary(grid.x) + package_thickness(period))],
+        contours=layer_lines + [
+            (grid.x, boundary(grid.x), package_style),
+            (grid.x, boundary(grid.x) + package_thickness(period), package_style)],
         trace={"t": t_rec,
                "series": [(rec_mf, "received", "#b2182b")],
                "db": True,
-               "guides": [t_pred],
+               # Every nadir horizon's two-way time as a faint guide, the
+               # package's as the one labelled marker: the record then reads as
+               # a train of layer echoes with a single arrival that belongs to
+               # none of them.
+               "guides": layer_times,
+               "markers": [(t_pred, "banded fabric")],
                "tlim": float(t_rec[-1]),
-               "xlim": (-125.0, 5.0),
+               "xlim": (-115.0, 0.0),
                # Two words and a unit: a movie frame is grabbed from the canvas,
                # so an over-long label is cut off rather than fitted.  The
                # reference is the compressed transmit pulse, as everywhere else.
                "xlabel": "compressed return (dB)",
-               "title": "received at the antenna, pulse-compressed"},
-        # No title on this one: it goes on a slide that carries its own
-        # heading, and a second one competing with it is noise.  The subtitle
-        # stays, because it holds the numbers the frame cannot be read without.
+               # No panel title: the axis label already says what the trace is,
+               # and the frames are to carry no other words.
+               "title": ""},
+        # No heading and no caption: the frame goes on a slide that carries its
+        # own words, and the panel titles already say what each side is.
         title="",
-        subtitle=(f"{N_BANDS} bands at the Bragg period for {FC_ON/1e6:.0f} MHz, "
-                  f"sounded with a {NARROWBAND_BW*100:.0f} percent-bandwidth "
-                  "wavelet (the post-compression band of a real system). "
-                  "Bright at resonance, gone a quarter-octave away - the "
-                  "fingerprint of banded fabric."),
         bare=bare, trace_width=0.5,
     )
 
@@ -538,18 +615,15 @@ def main(quick=False, render_only=False, bare=False, out=None):
     ax = axes[0]
     band = (f_tm > 20e6) & (f_tm < 120e6)
     ax.plot(f_tm[band] / 1e6, 20 * np.log10(np.maximum(np.abs(r_tm[band]), 1e-12)),
-            color="#333", lw=1.6, label="stack response (transfer matrix)")
-    # Staggered, and the off-resonance one right-aligned, so the two labels
-    # cannot collide across the 15 MHz between their markers.
-    marks = (("on", FC_ON, "#b2182b", "left", 1.5, -27.0),
-             ("off", FC_OFF, "#2166ac", "right", -1.5, -47.0))
-    for key, fc, colour, ha, dx_lbl, y_lbl in marks:
-        ax.axvline(fc / 1e6, color=colour, ls="--", lw=1.2)
-        ax.annotate(f"{fc/1e6:.0f} MHz pulse\nmeasured {level[key]:.0f} dB",
-                    (fc / 1e6 + dx_lbl, y_lbl), ha=ha, fontsize=10, color=colour)
+            color="#333", lw=1.6, label="transfer matrix")
+    # The two sounding frequencies and what each measured, carried by the legend
+    # rather than by callouts on the curve: a legend entry is a label, and the
+    # figure is not to hold prose.
+    for key, fc, colour in (("on", FC_ON, "#b2182b"), ("off", FC_OFF, "#2166ac")):
+        ax.axvline(fc / 1e6, color=colour, ls="--", lw=1.2,
+                   label=f"{fc/1e6:.0f} MHz, {level[key]:.0f} dB")
     ax.set_xlabel("frequency (MHz)")
-    ax.set_ylabel("|R| (dB)")
-    ax.set_title("the package is a bandpass reflector", loc="left")
+    ax.set_ylabel("reflectivity (dB)")
     ax.grid(alpha=0.25)
     ax.legend(fontsize=9, loc="lower right")
 
@@ -568,19 +642,13 @@ def main(quick=False, render_only=False, bare=False, out=None):
     ax.set_ylim(t_rec[-1] * 1e6, 0)
     ax.set_xlabel("compressed return (dB)")
     ax.set_ylabel("two-way time (us)")
-    ax.set_title("same package, two pulses, after pulse compression", loc="left")
-    ax.annotate("off-resonance level is a floor set by the\n"
-                "deep-layer transmission residual, so the\n"
-                "measured contrast is a lower bound",
-                (0.03, 0.985), xycoords="axes fraction", va="top",
-                fontsize=8.5, color="#444")
+    # The caveat that used to sit in this corner -- the off-resonance level is a
+    # floor set by the deep-layer transmission residual, so the measured
+    # contrast is a lower bound -- is in the module docstring and the README.
+    # The figure carries no prose.
     ax.grid(alpha=0.25)
     ax.legend(fontsize=9, loc="lower right")
-    fig.suptitle(
-        f"{N_BANDS} fabric bands, period {period:.2f} m, dipping "
-        f"{DIP_DEG:.0f} deg: bright at {FC_ON/1e6:.0f} MHz, collapsed at "
-        f"{FC_OFF/1e6:.0f} MHz.", x=0.008, ha="left", fontsize=14)
-    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    fig.tight_layout()
     save_figure(fig, OUT / "resonance.png", bare)
     plt.close(fig)
     print(f"  wrote {OUT / 'geometry.png'}, {OUT / 'banded_fabric.mp4'} "
