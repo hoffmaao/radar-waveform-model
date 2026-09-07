@@ -21,7 +21,11 @@ another is banded fabric -- nothing else in the reflectivity budget does that.
 The measured on/off contrast is a lower bound rather than the whole collapse:
 the off-resonance window does not sit on silence but on a floor set by the deep
 layering's transmission residual, since the two models differ in velocity below
-the package and their deep echoes do not subtract out.
+the package and their deep echoes do not subtract out.  It runs a little above
+the transfer-matrix prediction rather than below it, because the prediction is
+a pulse-weighted reflectivity ratio while the measurement is a ratio of
+matched-filtered peaks, and compression gains the coherent on-resonance stack
+response more than it gains that near-noise floor.
 
 Fabrics and processing are ex03's, imported from it, but the geometry is this
 example's own: the package dips at 12 degrees and crosses 350 m at x = 0, and
@@ -172,11 +176,16 @@ BAND_EDGE_WIDTH = 0.15
 #:
 #: Nothing is excluded.  ex03 clears a band of layers around its event because
 #: there the fabric transition and the layering are within a few dB of each
-#: other and a coincident layer would bury it; here the package comes back 18.5
-#: dB above the brightest deep horizon -- the margin the run prints -- so a
-#: layer at the same two-way time cannot hide it, and cutting a gap in the
-#: stratigraphy exactly where the answer is would be the one thing a viewer is
-#: entitled to be suspicious of.
+#: other and a coincident layer would bury it; here neither margin the run
+#: prints is anywhere near that close.  The package comes back 18.5 dB above the
+#: brightest deep horizon anywhere in the record, which is what says the
+#: layering never competes with it; and the horizon that does land at the
+#: package's own two-way time -- unresolved from it inside the compressed
+#: wavelet -- returns -107.2 dB, 33.7 dB down, which is what says a layer at the
+#: same two-way time cannot hide it.  That second number is the one the
+#: no-exclusion choice rests on: cutting a gap in the stratigraphy exactly where
+#: the answer is would be the one thing a viewer is entitled to be suspicious
+#: of.
 LAYERING = dict(sigma_factor=(4.0, 9.0), ice_spacing=(16.0, 26.0))
 
 
@@ -522,14 +531,31 @@ def main(quick=False, render_only=False, bare=False, out=None):
     # artifacts nothing on disk marks as mixed.
     geometry_figure(banded, boundary, layers, period, px, pz, bare)
 
+    # ---- pulse compression, shared by every level this example reports -----
+    # Short centred kernels: 'same' correlation aligns a kernel by its middle
+    # sample, so the wavelet must be centred in its own window rather than
+    # sitting at WAVELET_T0 of a record-length vector.  One kernel per
+    # frequency, built once here and used by the printed levels, the movie's
+    # trace and the resonance figure, and every level referenced to the
+    # COMPRESSED transmit peak of its own frequency.  Compressing the transmit
+    # pulse narrows and raises it, so a level against the raw peak sits about
+    # 2.7 dB lower than the same echo read off a compressed panel; two
+    # references for one number is how the resonance legend came to disagree
+    # with the curve plotted beside it.
+    dt_s = float(t_rec[1] - t_rec[0])
+    wt = np.arange(0.0, 2.0 * WAVELET_T0, dt_s)
+    kernels = {key: gabor(fc, wt, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
+               for key, fc in (("on", FC_ON), ("off", FC_OFF))}
+    rec_mf = {key: matched_filter(recorded[key], kernels[key]) for key in kernels}
+    pkg_env = {key: np.abs(analytic(matched_filter(traces[key], kernels[key])))
+               for key in kernels}
+    tx_ref = {key: float(np.max(np.abs(analytic(rec_mf[key])))) for key in kernels}
+
     # ---- measurement: on/off-resonance level against the prediction --------
     t_pred = float(echo_time(column, pz, Z_ANT, t_wave["on"], dip_deg=DIP_DEG))
     win = np.abs(t_rec - t_pred) < 0.12e-6
-    level = {}
-    for key in ("on", "off"):
-        env = np.abs(analytic(traces[key]))
-        tx = float(np.max(np.abs(analytic(recorded[key]))))
-        level[key] = 20 * np.log10(float(np.max(env[win])) / tx)
+    level = {key: 20 * np.log10(float(np.max(pkg_env[key][win])) / tx_ref[key])
+             for key in kernels}
     pulse_on = gabor(FC_ON, t_rec, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
     pulse_off = gabor(FC_OFF, t_rec, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
     n_fft = 8 * len(pulse_on)
@@ -538,54 +564,40 @@ def main(quick=False, render_only=False, bare=False, out=None):
     peak_on = predicted_response(pulse_on, r_tm, n_fft)
     peak_off = predicted_response(pulse_off, r_tm, n_fft)
     print(f"  on  resonance ({FC_ON/1e6:.0f} MHz): measured {level['on']:.1f} dB "
-          f"below the transmit pulse")
+          f"below the compressed transmit pulse")
     print(f"  off resonance ({FC_OFF/1e6:.0f} MHz): measured {level['off']:.1f} dB")
     print(f"  measured on/off contrast {level['on'] - level['off']:+.1f} dB; "
           f"transfer matrix predicts {20*np.log10(peak_on/peak_off):+.1f} dB")
 
-    # Short centred kernels, shared by the movie panel and the figure: 'same'
-    # correlation aligns a kernel by its middle sample, so the wavelet must be
-    # centred in its own window rather than sitting at WAVELET_T0 of a
-    # record-length vector.
-    dt_s = float(t_rec[1] - t_rec[0])
-    wt = np.arange(0.0, 2.0 * WAVELET_T0, dt_s)
-    kernels = {key: gabor(fc, wt, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
-               for key, fc in (("on", FC_ON), ("off", FC_OFF))}
+    # The margin between the package and the nadir layering is the point of the
+    # picture, so it is a number off the run rather than an assertion, and each
+    # side is measured on the record that contains it alone.  ``traces['on']``
+    # is banded minus twin, so the package sits there with no layering -- that
+    # is ``level['on']``, already measured above.  ``recorded['on']`` minus that
+    # difference is the package-free twin's own gather, so every horizon sits
+    # there with no package.  Only the dB reference is shared with the trace the
+    # movie draws.  Measuring the layering on the twin means the search needs no
+    # upper cut to keep the package's compressed sidelobes out, which is what
+    # lets it run to the floor of the record and include the horizons that
+    # coincide with the package.  Those are the ones a viewer would suspect of
+    # hiding it, and they are 30-odd dB down: the direct evidence for laying
+    # this column with no exclusion gap.
+    twin_env = np.abs(analytic(
+        matched_filter(recorded["on"] - traces["on"], kernels["on"])))
+    deep = t_rec > 2.0e-6
+    lay_db = 20 * np.log10(float(np.max(twin_env[deep])) / tx_ref["on"])
+    coin_db = 20 * np.log10(float(np.max(twin_env[win])) / tx_ref["on"])
+    print(f"  package alone {level['on']:.1f} dB, brightest deep nadir horizon "
+          f"{lay_db:.1f} dB, margin {level['on'] - lay_db:+.1f} dB")
+    print(f"  horizon coincident with the package {coin_db:.1f} dB, "
+          f"margin {level['on'] - coin_db:+.1f} dB")
 
     # ---- movie -------------------------------------------------------------
     # The trace panel shows the received record pulse-compressed, the way a
     # processed product presents it.  The compression is applied to the whole
     # record up front and revealed progressively; near the reveal edge that
     # implies half a kernel of lookahead, invisible at movie frame rates.
-    rec_mf = matched_filter(recorded["on"], kernels["on"])
-
-    # What the record shows, as against what the twin difference isolates.  The
-    # margin between the package and the nadir layering is the point of the
-    # picture, so it is measured off the same compressed trace the movie draws
-    # rather than asserted -- but each side is measured on the record that
-    # contains it alone.  ``traces['on']`` is banded minus twin, so the package
-    # sits there with no layering; ``recorded['on'] - traces['on']`` is the
-    # package-free twin's own gather, so every horizon sits there with no
-    # package.  Measuring the layering on the twin means the search needs no
-    # upper cut to keep the package's compressed sidelobes out, which is what
-    # lets it run to the floor of the record and include the horizons that
-    # coincide with the package.  Those are the ones a viewer would suspect of
-    # hiding it, and they are 30-odd dB down: the direct evidence for laying
-    # this column with no exclusion gap.
-    rec_env = np.abs(analytic(rec_mf))
-    rec_ref = float(np.max(rec_env))
-    pkg_env = np.abs(analytic(matched_filter(traces["on"], kernels["on"])))
-    twin_env = np.abs(analytic(
-        matched_filter(recorded["on"] - traces["on"], kernels["on"])))
-    deep = t_rec > 2.0e-6
-    pkg_db = 20 * np.log10(float(np.max(pkg_env[win])) / rec_ref)
-    lay_db = 20 * np.log10(float(np.max(twin_env[deep])) / rec_ref)
-    coin_db = 20 * np.log10(float(np.max(twin_env[win])) / rec_ref)
-    print(f"  in the record: package {pkg_db:.1f} dB, brightest deep nadir "
-          f"horizon {lay_db:.1f} dB, margin {pkg_db - lay_db:+.1f} dB")
-    print(f"  horizon coincident with the package {coin_db:.1f} dB, "
-          f"margin {pkg_db - coin_db:+.1f} dB")
-
+    #
     # Two kinds of reflector in one frame, so the frame has to tell them apart:
     # the conformable horizons faint, the package outline heavy and in the same
     # near-black the trace panel marks the package with.  Horizons below the
@@ -610,7 +622,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
             (grid.x, boundary(grid.x), package_style),
             (grid.x, boundary(grid.x) + package_thickness(period), package_style)],
         trace={"t": t_rec,
-               "series": [(rec_mf, "received", "#b2182b")],
+               "series": [(rec_mf["on"], "received", "#b2182b")],
                "db": True,
                # Every nadir horizon's two-way time as a faint guide, the
                # package's as the one labelled marker: the record then reads as
@@ -652,12 +664,8 @@ def main(quick=False, render_only=False, bare=False, out=None):
 
     ax = axes[1]
     for key, fc, colour in (("on", FC_ON, "#b2182b"), ("off", FC_OFF, "#2166ac")):
-        wavelet = kernels[key]
-        mf = matched_filter(traces[key], wavelet)
-        ref = float(np.max(np.abs(analytic(matched_filter(recorded[key], wavelet)))))
-        env = np.abs(analytic(mf))
         with np.errstate(divide="ignore"):
-            db = 20 * np.log10(np.maximum(env / ref, 1e-12))
+            db = 20 * np.log10(np.maximum(pkg_env[key] / tx_ref[key], 1e-12))
         ax.plot(db, t_rec * 1e6, lw=1.1, color=colour,
                 label=f"{fc/1e6:.0f} MHz")
     ax.axhline(t_pred * 1e6, color="#111", ls=":", lw=1.0)
