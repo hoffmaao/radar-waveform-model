@@ -282,7 +282,7 @@ def wavefield_movie(
         Draw the trace the surface receiver is recording, filling in as the
         simulation runs.  Keys: ``t`` (s), ``series`` as a list of
         ``(amplitude, label, colour)``, and optionally ``gain_power`` (time
-        gain applied before display, default 2), ``markers`` as
+        gain applied before display, default 0 = none), ``markers`` as
         ``[(t_seconds, label), ...]``, ``db`` (default True: show
         ``20 log10`` of the analytic envelope, i.e. returned power, referenced
         to the transmit pulse -- this is how a processed sounding is displayed

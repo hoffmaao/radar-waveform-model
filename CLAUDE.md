@@ -34,7 +34,7 @@ comparable with the Ridge A inversion.
 ## Runtimes (14-core M-series, full scale)
 
 ex01 ~10 min, +2.4 h with `--radargram`; ex02 ~45 min; ex03 ~15 min, +50 min
-radargram; ex04 ~80 min (4 runs); ex05 ~2 h and ex06 ~2.1 h (6 runs each: five
+radargram; ex04 ~2.5 h (4 runs); ex05 ~2 h and ex06 ~2.1 h (6 runs each: five
 epochs plus a layerless twin). Cluster kit in `cluster/`.
 
 **Long runs**: this environment reaps harness background tasks. Launch via
