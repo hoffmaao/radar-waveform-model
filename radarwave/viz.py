@@ -177,7 +177,7 @@ def _rgb(fig):
     return buf[..., :3].copy()
 
 
-def _auto_figsize(x, z, width=11.0, max_height=10.0, min_width=4.6):
+def _auto_figsize(x, z, width=13.5, max_height=13.0, min_width=5.2):
     """Figure size that renders an equal-aspect domain without huge margins.
 
     A deep, narrow model would otherwise produce a figure too skinny to fit its
@@ -219,7 +219,7 @@ def wavefield_movie(
     follow=None,
     guide=None,
     trace=None,
-    trace_width=0.72,
+    trace_width=0.46,
     dpi=112,
     crf=24,
     also_gif=False,
@@ -259,8 +259,13 @@ def wavefield_movie(
         of anything that matters.
     background : (nx, nz) array, optional
         A static field (typically permittivity) drawn underneath the wave.
-    contours : sequence of (x_array, z_array) pairs, optional
+    contours : sequence of (x_array, z_array) or (x_array, z_array, style)
         Polylines drawn over every frame, e.g. layer or interface geometry.
+        The optional third element is a mapping of line keywords merged over the
+        faint default.  That is what lets one call draw a background
+        stratigraphy and the one interface the scene is about without the two
+        reading alike -- thirty layer traces in the default grey would bury a
+        package outline drawn in the same grey.
     annotations : sequence of (x, z, text) tuples, optional
     follow : dict, optional
         ``{"speed": m/s, "window": m, "start": m}``.  Scrolls the depth axis
@@ -277,12 +282,16 @@ def wavefield_movie(
         Draw the trace the surface receiver is recording, filling in as the
         simulation runs.  Keys: ``t`` (s), ``series`` as a list of
         ``(amplitude, label, colour)``, and optionally ``gain_power`` (time
-        gain applied before display, default 2), ``markers`` as
+        gain applied before display, default 0 = none), ``markers`` as
         ``[(t_seconds, label), ...]``, ``db`` (default True: show
         ``20 log10`` of the analytic envelope, i.e. returned power, referenced
         to the transmit pulse -- this is how a processed sounding is displayed
-        and it keeps a 60 dB range readable), ``norm_after`` (linear mode only),
-        ``xlim``, ``title`` and ``note``.
+        and it keeps a 60 dB range readable), ``ref`` (dB mode only: an explicit
+        reference level in place of the largest peak in the panel),
+        ``norm_after`` (linear mode only), ``guides`` as ``[t_seconds, ...]``
+        drawn as faint horizontal reference times, ``tlim`` (extent of the time
+        axis in seconds, default the whole trace), ``xlabel`` (override for the
+        trace axis label), ``xlim``, ``title`` and ``note``.
     crf : int
         x264 constant rate factor; lower is better quality and a bigger file.
     also_gif : bool
@@ -336,7 +345,7 @@ def wavefield_movie(
 
     extent = (x[0], x[-1], z[-1], z[0])
     if figsize is None and follow:
-        figsize = (5.2 * len(panels) + 1.0, 7.0)
+        figsize = (6.2 * len(panels) + 1.0, 8.0)
     if figsize is None:
         w, h = _auto_figsize(x, z)
         total = w * (1.0 if len(panels) == 1 else 0.62 * len(panels) + 0.4)
@@ -345,8 +354,8 @@ def wavefield_movie(
         # Scale the extra canvas with the panel, so narrowing the trace gives
         # the wavefield the space back instead of leaving a gap -- but keep a
         # floor: tick labels and the axis label need a fixed number of inches
-        # whatever the ratio, and below about 3 they run off the canvas.
-        figsize = (figsize[0] + max(3.0, 5.8 * trace_width), figsize[1])
+        # whatever the ratio, and below about 2.6 they run off the canvas.
+        figsize = (figsize[0] + max(2.6, 5.8 * trace_width), figsize[1])
 
     n_field = len(panels)
     widths = [1.0] * n_field + ([trace_width] if trace else [])
@@ -373,7 +382,10 @@ def wavefield_movie(
                 vmin=lo, vmax=hi + 0.35 * (hi - lo or 1.0),
             )
         for line in contours or []:
-            ax.plot(line[0], line[1], color=ANNOT, lw=0.7, alpha=0.35, zorder=1)
+            style = dict(color=ANNOT, lw=0.7, alpha=0.35, zorder=1)
+            if len(line) > 2:
+                style.update(line[2])
+            ax.plot(line[0], line[1], **style)
         images.append(ax.imshow(rgba_frame(stack, vmax, 0), extent=extent,
                                 aspect="auto" if follow else "equal", zorder=2))
         for ax_, az_, text in annotations or []:
@@ -448,15 +460,14 @@ def wavefield_movie(
         trace_ax.set_xlim(*trace.get("xlim", (-100.0, 5.0) if trace.get("db", True)
                                      else (-1.15, 1.15)))
         trace_ax.set_ylim(trace.get("tlim", t_tr[-1]) * 1e6, 0.0)
-        # Wrap onto two lines below a narrow panel: on one line this label is
-        # wider than its own column once ``trace_width`` drops much under 0.7,
-        # and it runs off the canvas rather than shrinking the axes.
-        wrap_trace_label = trace_width < 0.62
+        # Two words and a unit, and no wider.  A movie frame is grabbed from the
+        # canvas, so ``savefig.bbox = "tight"`` never runs and a label wider than
+        # its own column is not shrunk to fit, it is cut off - which is what
+        # "returned power (dB re. transmit pulse)" did at the right-hand edge of
+        # every frame.  The reference is the transmit pulse throughout; that
+        # belongs in the caption, not on the axis.
         trace_ax.set_xlabel(trace.get(
-            "xlabel",
-            ("returned power\n(dB re. transmit pulse)" if wrap_trace_label
-             else "returned power (dB re. transmit pulse)") if trace.get("db", True)
-            else "amplitude",
+            "xlabel", "returned power (dB)" if trace.get("db", True) else "amplitude",
         ))
         trace_ax.set_ylabel("two-way time (us)")
         # Wrap for the same reason the subtitle does, but against the column
@@ -475,17 +486,25 @@ def wavefield_movie(
         if len(series) > 1:
             trace_ax.legend(fontsize=10, loc="lower center")
 
-    fig.suptitle(title, x=0.012, ha="left", fontsize=15, y=0.995)
+    # The top band is reserved for whichever of the two are actually there.
+    # Drawing an empty suptitle and reserving room for it anyway leaves a blank
+    # stripe across the top of every frame, and a subtitle with no title above
+    # it floats a whole title's height below the edge.
+    if title:
+        fig.suptitle(title, x=0.012, ha="left", fontsize=15, y=0.995)
     if subtitle:
         # Wrap by hand: a long single line runs off the canvas and is clipped.
         wrapped = "\n".join(textwrap.wrap(subtitle, width=max(60, int(figsize[0] * 10.5))))
-        fig.text(0.012, 0.955, wrapped, ha="left", va="top", fontsize=10.5, color="#222")
+        fig.text(0.012, 0.955 if title else 0.992, wrapped, ha="left", va="top",
+                 fontsize=10.5, color="#222")
     clock = axes[-1].text(
         0.985, 0.03, "", transform=axes[-1].transAxes, ha="right", va="bottom",
         fontsize=12, family="monospace", color=ANNOT, zorder=5,
         bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="none", alpha=0.85),
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.93 if subtitle else 0.96))
+    top = {(True, True): 0.93, (True, False): 0.96,
+           (False, True): 0.95, (False, False): 1.0}[(bool(title), bool(subtitle))]
+    fig.tight_layout(rect=(0, 0, 1, top))
     if bare:
         # Strip after building rather than skipping the calls, so there is one
         # code path.  The clock and the guide caption are detached artists
@@ -530,6 +549,15 @@ def wavefield_movie(
                 for ln in guide_lines:
                     ln.set_ydata([z_front, z_front])
                 guide_text.xy = (0.02, z_front)
+                # Caption below the line, except when the line is near the
+                # bottom of the window: there it would be written over the tick
+                # numbers, which is what it did whenever the wavefront ran out
+                # of the follow window.  Flipped above instead.
+                top, bottom = guide_text.axes.get_ylim()[1], guide_text.axes.get_ylim()[0]
+                depth_frac = ((z_front - top) / (bottom - top)) if bottom != top else 0.0
+                low = depth_frac > 0.88
+                guide_text.set_va("bottom" if low else "top")
+                guide_text.set_position((0, 7 if low else -7))
 
             if follow:
                 # Centre on the measured wavefront when there is one: a fixed

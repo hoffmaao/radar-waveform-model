@@ -360,7 +360,7 @@ def received_waveforms(surface, column_of, layer_depths, measured, t_wave, out_p
             ax.axhline(arrival(col, d, axis, k) * 1e6, color="#999", ls=":", lw=0.9)
         ax.set_xlim(-118, 5)
         ax.set_ylim((t[-1] - 0.25e-6) * 1e6, 0)
-        ax.set_xlabel("returned power\n(dB re. transmit pulse)")
+        ax.set_xlabel("returned power (dB)")
         ax.set_title(f"{titles[k]}\n{names[w]}", loc="left", fontsize=12)
         ax.grid(alpha=0.2)
 
@@ -665,14 +665,15 @@ def main(quick=False, render_only=False, bare=False, out=None):
         ax.plot(np.asarray(lag) * 1e12, rec_z, mk, ms=7, mfc="none", mew=1.8,
                 color=col_, label=lbl)
     ax.set_xscale("symlog", linthresh=30)
-    ax.set_xlabel("one-way delay between\neigenpolarisations (ps)")
-    ax.set_ylabel("depth (m)  [note: FDTD range only]", fontsize=11)
+    ax.set_xlabel("one-way delay (ps)")
+    ax.set_ylabel("depth (m)")
     ax.set_ylim(zmax, 0)
     ax.legend(fontsize=9.5, loc="lower right")
     span = max(abs(float(np.asarray(v[1])[-1])) for v in measured.values()) / max(
         min(abs(float(np.asarray(v[1])[-1])) for v in measured.values()), 1e-30)
-    ax.set_title(f"2.  FDTD matches the traveltime model\nover a {span:.0f}x range of "
-                 "fabric strength", loc="left", fontsize=12)
+    ax.set_title(f"2.  FDTD matches the traveltime model over a {span:.0f}x range\n"
+                 "of fabric strength (depths the FDTD run reaches only)",
+                 loc="left", fontsize=12)
 
     ax = axes[2]
     # Multilook in range for display, as a real interferogram product is.
@@ -690,7 +691,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
         hsv_to_rgb(hsv), aspect="auto", origin="upper",
         extent=(0, n_traces * trace_spacing / 1000.0, z_valid[-1], z_valid[0]),
     )
-    ax.set_xlabel("distance along profile (km)")
+    ax.set_xlabel("distance (km)")
     ax.set_ylim(column.thickness, 0)
     ax.set_title(
         f"3.  synthetic interferogram at {FC_MCORDS / 1e6:.0f} MHz\n"

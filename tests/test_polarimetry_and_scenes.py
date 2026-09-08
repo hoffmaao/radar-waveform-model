@@ -529,3 +529,37 @@ def test_importing_ex04_leaves_ex03s_geometry_alone():
     _, px4, pz4 = ex03.specular_geometry(ex04.SRC_X, ex04.DIP_DEG, ex04.DEPTH_AT_X0)
     assert px4 == pytest.approx(-18.76, abs=0.01)
     assert pz4 == pytest.approx(346.01, abs=0.01)
+
+
+def test_ex04_lays_horizons_through_its_column_and_across_its_own_event():
+    """ex04's nadir stratigraphy is unbroken, and that is the deliberate part.
+
+    ex03 clears a band of layers around its event because there the fabric
+    transition and the layering come back within a few dB of each other, and a
+    coincident horizon would bury it.  ex04's package returns clear of the
+    brightest horizon, so the gap buys nothing -- while a gap cut in the
+    stratigraphy exactly where the answer is would be the first thing a viewer
+    distrusted.  The layering also has to reach the floor of a domain more than twice as
+    deep as ex03's, or the record carries no nadir reference over most of its
+    length and the package has nothing to be read against.
+    """
+    _examples_on_path()
+    import ex03_dipping_fabric_transition as ex03
+    import ex04_banded_fabric as ex04
+    from radarwave import IceColumn
+
+    zlim = (-8.0, 560.0)
+    depths = np.array([lay.depth for lay in
+                       conformal_layering(zlim[1], **ex04.LAYERING)])
+
+    assert depths.max() > zlim[1] - 40.0
+    ice = np.sort(depths[depths > 95.0])
+    assert ice.size >= 18
+    assert np.diff(ice).max() <= ex04.LAYERING["ice_spacing"][1]
+
+    # ex03's helper is what knows where the package images at nadir; there has
+    # to be a horizon inside the band ex03 would have cleared.
+    column = IceColumn(**ex03.COLUMN)
+    d_event, _ = ex03.layer_exclusion(column, zlim, ex04.SRC_X,
+                                      ex04.DIP_DEG, ex04.DEPTH_AT_X0)
+    assert np.min(np.abs(depths - d_event)) < ex03.LAYER_GAP_HALFWIDTH

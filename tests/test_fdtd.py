@@ -146,6 +146,60 @@ def test_reflection_amplitude_scales_as_fresnel():
     assert abs(strong / weak / expected - 1.0) < 0.05
 
 
+def _isolated_reflection(eps_bot, dx, z_interface=40.0, z_src=2.0, t_end=1.0e-6):
+    """Reflection off a planar contrast, with the source's own field removed.
+
+    :func:`_planar_reflection` isolates the echo by arrival time, which works
+    while the source-region field has decayed by the time the echo returns.  It
+    has not on a coarse grid: at 0.30 m cells the near field of a point source
+    twelve metres away is larger than a weak reflection, and the "reflection"
+    measured there is the wake.  Differencing against a run with no contrast in
+    it removes that exactly, which is what examples 3 and 4 do for the same
+    reason.
+    """
+    zlim = (0.0, z_interface + 30.0)
+    base = PropertyGrid.uniform((-60, 60), zlim, dx, eps=EPS_ICE)
+    _, Z = base.mesh()
+    dt = 0.8 * max_time_step(min(EPS_ICE, eps_bot), 1.0, base.dx, base.dz)
+    t = np.arange(0, t_end, dt)
+
+    traces = []
+    for eps in (eps_bot, EPS_ICE):
+        grid = base.with_properties(
+            eps=np.where(Z >= z_interface, eps, EPS_ICE)).padded(npml=10)
+        res = FDTD2D(grid, dt, npml=10, mode="TM").run(
+            np.array([[0.0, z_src]]), blackharrispulse(FC, t), np.array([[0.0, z_src]]))
+        traces.append(res.gather[:, 0, 0])
+    diff = traces[0] - traces[1]
+
+    t_refl = 2 * (z_interface - z_src) / (C0 / np.sqrt(EPS_ICE))
+    win = np.abs(res.t - t_refl) < 30e-9
+    return float(np.max(np.abs(diff[win])))
+
+
+def test_a_strong_contrast_reflects_correctly_on_example_1s_grid():
+    """Example 1's bed is under-resolved in the rock, and it does not matter.
+
+    The bed is ice over eps = 6 bedrock, and at example 1's 0.30 m cells that is
+    4.9 nodes per wavelength *inside the rock* - below the five this package
+    otherwise works to.  The argument for accepting it is that what is
+    under-resolved there is the transmitted wave, which the PML absorbs and
+    which never comes back; the reflection is set by the impedance step and by
+    the incident wave, and the ice resolves that at 6.7.
+
+    The argument is checked rather than made.  At example 1's own spacing the
+    strong contrast and a weak one reflect in the ratio of their Fresnel
+    coefficients to within 8 percent - measured 5.36 against 4.99, so the coarse
+    rock costs about 0.6 dB on the bed and nothing on the layering.  Taking the
+    ratio cancels the source normalisation and the spreading, which are common
+    to both runs; at 0.10 m the same measurement returns 5.01.
+    """
+    strong = _isolated_reflection(6.0, dx=0.30)
+    weak = _isolated_reflection(3.60, dx=0.30)
+    expected = abs(_fresnel(EPS_ICE, 6.0) / _fresnel(EPS_ICE, 3.60))
+    assert abs(strong / weak / expected - 1.0) < 0.10
+
+
 def test_reflection_amplitude_absolute():
     """Reflected amplitude equals |r| times the incident field at two-way range."""
     eps_bot, z_interface, z_src = 4.60, 14.0, 2.0
