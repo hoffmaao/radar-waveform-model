@@ -365,8 +365,9 @@ filtered through the stack reflectivity. It is a lower bound, since the
 off-resonance window sits on the deep-layer transmission-residual floor rather
 than on silence, and brightening the deep horizons raises that floor rather
 than the signal. The compressed record the figures show gains the coherent
-on-resonance echo about 2.9 dB more than the off-resonance scatter, so a
-processed product reads a wider contrast than the number quoted here - a
+on-resonance echo about 2.8 dB more than the off-resonance scatter - the run
+measures that differential and prints the contrast in both domains - so a
+processed product reads a wider contrast than the number quoted here, a
 property of the resonance rather than a discrepancy. A reflector that appears
 in one frequency band and vanishes in another is banded fabric; nothing else in
 the reflectivity budget does that.

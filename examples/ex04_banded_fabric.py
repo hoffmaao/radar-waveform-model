@@ -22,10 +22,11 @@ The measured on/off contrast is a lower bound rather than the whole collapse:
 the off-resonance window does not sit on silence but on a floor set by the deep
 layering's transmission residual, since the two models differ in velocity below
 the package and their deep echoes do not subtract out.  It is quoted
-uncompressed, matching the transfer-matrix prediction it is compared against;
-the compressed record the figures display gains the coherent on-resonance echo
-about 2.9 dB more than the off-resonance scatter, so a processed product shows a
-wider contrast still.
+uncompressed, matching the transfer-matrix prediction it is compared against.
+The compressed record the figures display gains the coherent on-resonance echo
+about 2.8 dB more than the off-resonance scatter -- the run measures that
+differential rather than asserting it -- so a processed product shows a wider
+contrast still.
 
 Fabrics and processing are ex03's, imported from it, but the geometry is this
 example's own: the package dips at 12 degrees and crosses 350 m at x = 0, and
@@ -541,9 +542,11 @@ def main(quick=False, render_only=False, bare=False, out=None):
     # example works in two domains and keeps each comparison inside one of
     # them.  On resonance the stack's echo carries a long coherent ringing tail
     # that the matched filter sums; off resonance the scatter has no such tail,
-    # so compression gains the on-resonance echo about 2.9 dB more than the
+    # so compression gains the on-resonance echo by several dB more than the
     # off-resonance one.  A contrast therefore moves with the domain it is read
-    # in, and the two domains are used for different jobs below.
+    # in, and the two domains are used for different jobs below.  The run prints
+    # that differential and the contrast in both domains, so the split is a
+    # measurement rather than a claim about one.
     dt_s = float(t_rec[1] - t_rec[0])
     wt = np.arange(0.0, 2.0 * WAVELET_T0, dt_s)
     kernels = {key: gabor(fc, wt, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
@@ -568,6 +571,9 @@ def main(quick=False, render_only=False, bare=False, out=None):
         env = np.abs(analytic(traces[key]))
         tx = float(np.max(np.abs(analytic(recorded[key]))))
         level[key] = 20 * np.log10(float(np.max(env[win])) / tx)
+    comp = {key: 20 * np.log10(float(np.max(pkg_env[key][win])) / tx_ref[key])
+            for key in kernels}
+    gain_gap = (comp["on"] - level["on"]) - (comp["off"] - level["off"])
     pulse_on = gabor(FC_ON, t_rec, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
     pulse_off = gabor(FC_OFF, t_rec, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
     n_fft = 8 * len(pulse_on)
@@ -580,6 +586,9 @@ def main(quick=False, render_only=False, bare=False, out=None):
     print(f"  off resonance ({FC_OFF/1e6:.0f} MHz): measured {level['off']:.1f} dB")
     print(f"  measured on/off contrast {level['on'] - level['off']:+.1f} dB; "
           f"transfer matrix predicts {20*np.log10(peak_on/peak_off):+.1f} dB")
+    print(f"  compression gains the on-resonance echo {gain_gap:+.1f} dB more "
+          f"than the off-resonance one, so the same contrast reads "
+          f"{comp['on'] - comp['off']:+.1f} dB compressed")
 
     # COMPRESSED, all three: unlike the on/off contrast above, these compare
     # signals inside the same record and the same domain, so the reference
@@ -597,7 +606,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
     twin_env = np.abs(analytic(
         matched_filter(recorded["on"] - traces["on"], kernels["on"])))
     deep = t_rec > 2.0e-6
-    pkg_db = 20 * np.log10(float(np.max(pkg_env["on"][win])) / tx_ref["on"])
+    pkg_db = comp["on"]
     lay_db = 20 * np.log10(float(np.max(twin_env[deep])) / tx_ref["on"])
     coin_db = 20 * np.log10(float(np.max(twin_env[win])) / tx_ref["on"])
     print(f"  compressed: package alone {pkg_db:.1f} dB, brightest deep nadir "
