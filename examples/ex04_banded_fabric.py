@@ -684,7 +684,10 @@ def main(quick=False, render_only=False, bare=False, out=None):
     ax.set_xlabel("frequency (MHz)")
     ax.set_ylabel("reflectivity (dB)")
     ax.grid(alpha=0.25)
-    ax.legend(fontsize=9, loc="lower right")
+    # Opaque frame: the transfer-matrix curve runs its deep nulls straight
+    # through this corner, and at slide size a frameless legend reads the curve
+    # as part of its own text ("60|MHz").
+    ax.legend(fontsize=9, loc="lower right", frameon=True, framealpha=1.0)
 
     ax = axes[1]
     for key, fc, colour in (("on", FC_ON, "#b2182b"), ("off", FC_OFF, "#2166ac")):
@@ -702,7 +705,7 @@ def main(quick=False, render_only=False, bare=False, out=None):
     # contrast is a lower bound -- is in the module docstring and the README.
     # The figure carries no prose.
     ax.grid(alpha=0.25)
-    ax.legend(fontsize=9, loc="lower right")
+    ax.legend(fontsize=9, loc="lower right", frameon=True, framealpha=1.0)
     fig.tight_layout()
     save_figure(fig, OUT / "resonance.png", bare)
     plt.close(fig)
