@@ -21,11 +21,11 @@ another is banded fabric -- nothing else in the reflectivity budget does that.
 The measured on/off contrast is a lower bound rather than the whole collapse:
 the off-resonance window does not sit on silence but on a floor set by the deep
 layering's transmission residual, since the two models differ in velocity below
-the package and their deep echoes do not subtract out.  It runs a little above
-the transfer-matrix prediction rather than below it, because the prediction is
-a pulse-weighted reflectivity ratio while the measurement is a ratio of
-matched-filtered peaks, and compression gains the coherent on-resonance stack
-response more than it gains that near-noise floor.
+the package and their deep echoes do not subtract out.  It is quoted
+uncompressed, matching the transfer-matrix prediction it is compared against;
+the compressed record the figures display gains the coherent on-resonance echo
+about 2.9 dB more than the off-resonance scatter, so a processed product shows a
+wider contrast still.
 
 Fabrics and processing are ex03's, imported from it, but the geometry is this
 example's own: the package dips at 12 degrees and crosses 350 m at x = 0, and
@@ -531,17 +531,19 @@ def main(quick=False, render_only=False, bare=False, out=None):
     # artifacts nothing on disk marks as mixed.
     geometry_figure(banded, boundary, layers, period, px, pz, bare)
 
-    # ---- pulse compression, shared by every level this example reports -----
+    # ---- pulse compression, shared by the movie, the figure and the margins -
     # Short centred kernels: 'same' correlation aligns a kernel by its middle
     # sample, so the wavelet must be centred in its own window rather than
     # sitting at WAVELET_T0 of a record-length vector.  One kernel per
-    # frequency, built once here and used by the printed levels, the movie's
-    # trace and the resonance figure, and every level referenced to the
-    # COMPRESSED transmit peak of its own frequency.  Compressing the transmit
-    # pulse narrows and raises it, so a level against the raw peak sits about
-    # 2.7 dB lower than the same echo read off a compressed panel; two
-    # references for one number is how the resonance legend came to disagree
-    # with the curve plotted beside it.
+    # frequency, built once here and shared by everything downstream.
+    #
+    # Compression is not free of the quantity being measured, which is why this
+    # example works in two domains and keeps each comparison inside one of
+    # them.  On resonance the stack's echo carries a long coherent ringing tail
+    # that the matched filter sums; off resonance the scatter has no such tail,
+    # so compression gains the on-resonance echo about 2.9 dB more than the
+    # off-resonance one.  A contrast therefore moves with the domain it is read
+    # in, and the two domains are used for different jobs below.
     dt_s = float(t_rec[1] - t_rec[0])
     wt = np.arange(0.0, 2.0 * WAVELET_T0, dt_s)
     kernels = {key: gabor(fc, wt, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
@@ -552,10 +554,20 @@ def main(quick=False, render_only=False, bare=False, out=None):
     tx_ref = {key: float(np.max(np.abs(analytic(rec_mf[key])))) for key in kernels}
 
     # ---- measurement: on/off-resonance level against the prediction --------
+    # UNCOMPRESSED, both sides: ``predicted_response`` is an envelope-peak ratio
+    # of the raw pulse filtered through the stack reflectivity, so measuring the
+    # echo the same way keeps the comparison against the transfer matrix
+    # like-for-like.  A compressed measurement against an uncompressed
+    # prediction is not well posed however carefully it is captioned, and the
+    # figures a reader is looking at are compressed, so the domain is named
+    # wherever these levels are quoted.
     t_pred = float(echo_time(column, pz, Z_ANT, t_wave["on"], dip_deg=DIP_DEG))
     win = np.abs(t_rec - t_pred) < 0.12e-6
-    level = {key: 20 * np.log10(float(np.max(pkg_env[key][win])) / tx_ref[key])
-             for key in kernels}
+    level = {}
+    for key in kernels:
+        env = np.abs(analytic(traces[key]))
+        tx = float(np.max(np.abs(analytic(recorded[key]))))
+        level[key] = 20 * np.log10(float(np.max(env[win])) / tx)
     pulse_on = gabor(FC_ON, t_rec, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
     pulse_off = gabor(FC_OFF, t_rec, bandwidth=NARROWBAND_BW, t0=WAVELET_T0)
     n_fft = 8 * len(pulse_on)
@@ -564,33 +576,34 @@ def main(quick=False, render_only=False, bare=False, out=None):
     peak_on = predicted_response(pulse_on, r_tm, n_fft)
     peak_off = predicted_response(pulse_off, r_tm, n_fft)
     print(f"  on  resonance ({FC_ON/1e6:.0f} MHz): measured {level['on']:.1f} dB "
-          f"below the compressed transmit pulse")
+          f"below the transmit pulse, uncompressed")
     print(f"  off resonance ({FC_OFF/1e6:.0f} MHz): measured {level['off']:.1f} dB")
     print(f"  measured on/off contrast {level['on'] - level['off']:+.1f} dB; "
           f"transfer matrix predicts {20*np.log10(peak_on/peak_off):+.1f} dB")
 
-    # The margin between the package and the nadir layering is the point of the
-    # picture, so it is a number off the run rather than an assertion, and each
-    # side is measured on the record that contains it alone.  ``traces['on']``
-    # is banded minus twin, so the package sits there with no layering -- that
-    # is ``level['on']``, already measured above.  ``recorded['on']`` minus that
+    # COMPRESSED, all three: unlike the on/off contrast above, these compare
+    # signals inside the same record and the same domain, so the reference
+    # cancels and the compressed one is the right choice -- it is the domain the
+    # movie and the resonance panel display.  Each side is measured on the
+    # record that contains it alone.  ``traces['on']`` is banded minus twin, so
+    # the package sits there with no layering; ``recorded['on']`` minus that
     # difference is the package-free twin's own gather, so every horizon sits
-    # there with no package.  Only the dB reference is shared with the trace the
-    # movie draws.  Measuring the layering on the twin means the search needs no
-    # upper cut to keep the package's compressed sidelobes out, which is what
-    # lets it run to the floor of the record and include the horizons that
-    # coincide with the package.  Those are the ones a viewer would suspect of
-    # hiding it, and they are 30-odd dB down: the direct evidence for laying
-    # this column with no exclusion gap.
+    # there with no package.  Measuring the layering on the twin means the
+    # search needs no upper cut to keep the package's compressed sidelobes out,
+    # which is what lets it run to the floor of the record and include the
+    # horizons that coincide with the package.  Those are the ones a viewer
+    # would suspect of hiding it, and they are 30-odd dB down: the direct
+    # evidence for laying this column with no exclusion gap.
     twin_env = np.abs(analytic(
         matched_filter(recorded["on"] - traces["on"], kernels["on"])))
     deep = t_rec > 2.0e-6
+    pkg_db = 20 * np.log10(float(np.max(pkg_env["on"][win])) / tx_ref["on"])
     lay_db = 20 * np.log10(float(np.max(twin_env[deep])) / tx_ref["on"])
     coin_db = 20 * np.log10(float(np.max(twin_env[win])) / tx_ref["on"])
-    print(f"  package alone {level['on']:.1f} dB, brightest deep nadir horizon "
-          f"{lay_db:.1f} dB, margin {level['on'] - lay_db:+.1f} dB")
+    print(f"  compressed: package alone {pkg_db:.1f} dB, brightest deep nadir "
+          f"horizon {lay_db:.1f} dB, margin {pkg_db - lay_db:+.1f} dB")
     print(f"  horizon coincident with the package {coin_db:.1f} dB, "
-          f"margin {level['on'] - coin_db:+.1f} dB")
+          f"margin {pkg_db - coin_db:+.1f} dB")
 
     # ---- movie -------------------------------------------------------------
     # The trace panel shows the received record pulse-compressed, the way a
@@ -634,7 +647,8 @@ def main(quick=False, render_only=False, bare=False, out=None):
                "xlim": (-115.0, 0.0),
                # Two words and a unit: a movie frame is grabbed from the canvas,
                # so an over-long label is cut off rather than fitted.  The
-               # reference is the compressed transmit pulse, as everywhere else.
+               # reference is the compressed transmit pulse, as in the
+               # resonance panel and the margins printed against it.
                "xlabel": "compressed return (dB)",
                # No panel title: the axis label already says what the trace is,
                # and the frames are to carry no other words.
@@ -651,12 +665,13 @@ def main(quick=False, render_only=False, bare=False, out=None):
     band = (f_tm > 20e6) & (f_tm < 120e6)
     ax.plot(f_tm[band] / 1e6, 20 * np.log10(np.maximum(np.abs(r_tm[band]), 1e-12)),
             color="#333", lw=1.6, label="transfer matrix")
-    # The two sounding frequencies and what each measured, carried by the legend
-    # rather than by callouts on the curve: a legend entry is a label, and the
-    # figure is not to hold prose.
+    # The two sounding frequencies, carried by the legend rather than by
+    # callouts on the curve: a legend entry is a label, and the figure is not to
+    # hold prose.  No dB here: the right panel's axis is the one place in this
+    # figure that states an absolute level, so nothing can contradict it.
     for key, fc, colour in (("on", FC_ON, "#b2182b"), ("off", FC_OFF, "#2166ac")):
         ax.axvline(fc / 1e6, color=colour, ls="--", lw=1.2,
-                   label=f"{fc/1e6:.0f} MHz, {level[key]:.0f} dB")
+                   label=f"{fc/1e6:.0f} MHz")
     ax.set_xlabel("frequency (MHz)")
     ax.set_ylabel("reflectivity (dB)")
     ax.grid(alpha=0.25)

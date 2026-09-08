@@ -339,8 +339,8 @@ background conductivity, spaced 16-26 m, which gives 21 horizons between
 close-off and the floor. Nothing is excluded. Example 3 clears a band of layers
 around its event because there the transition and the layering come back within
 a few dB of each other, whereas here the package returns **+18.5 dB** above the
-brightest deep horizon (-73.5 against -92.0 dB, every level here and in the
-resonance figure referenced to the compressed transmit peak), so a coincident
+brightest deep horizon (-73.5 against -92.0 dB, both compressed and referenced
+to the compressed transmit peak, as the figures are), so a coincident
 horizon cannot hide it - and a gap cut in the stratigraphy exactly where the
 answer is would be the first thing to distrust. The stratigraphy does put one
 horizon at the package's own two-way time: 346.4 m under the antenna, arriving
@@ -349,24 +349,27 @@ horizon at the package's own two-way time: 346.4 m under the antenna, arriving
 0.1 dB. Each side of the margin is measured on the record that holds it alone -
 the package on the twin difference, the horizons on the package-free twin's own
 gather - so the search for the brightest horizon runs to the floor of the record
-and includes that coincident one rather than stopping short of the event. The movie draws every horizon
-over the wavefield, with the package outline heavy over them, and marks each
-horizon's two-way time on the trace, so the record reads as a train of nadir
-echoes with a single arrival that belongs to none of them.
+and includes that coincident one rather than stopping short of the event. The
+movie draws every horizon over the wavefield, with the package outline heavy
+over them, and marks each horizon's two-way time on the trace, so the record
+reads as a train of nadir echoes with a single arrival that belongs to none of
+them.
 
 The resonance is the fingerprint. The same 20-band package is sounded at two
 pulse frequencies: 60 MHz, where the banding is tuned, and 45 MHz, a
 quarter-octave below. On resonance the return is bright; off it, it
-collapses. The measured on/off contrast is **+22.3 dB** against +20.7 dB from
-the transfer matrix. It is a lower bound on the collapse, since the
+collapses. The measured on/off contrast is **+19.5 dB** against +20.7 dB from
+the transfer matrix, both uncompressed, which is what makes the comparison
+like-for-like: the prediction is an envelope-peak ratio of the raw pulse
+filtered through the stack reflectivity. It is a lower bound, since the
 off-resonance window sits on the deep-layer transmission-residual floor rather
 than on silence, and brightening the deep horizons raises that floor rather
-than the signal. It runs above the prediction because the two are not formed
-the same way: the prediction is a pulse-weighted reflectivity ratio, whereas
-the measurement is a ratio of matched-filtered peaks, and compression gains the
-coherent on-resonance stack response about 1.6 dB more than it gains that
-near-noise floor. A reflector that appears in one frequency band and vanishes
-in another is banded fabric; nothing else in the reflectivity budget does that.
+than the signal. The compressed record the figures show gains the coherent
+on-resonance echo about 2.9 dB more than the off-resonance scatter, so a
+processed product reads a wider contrast than the number quoted here - a
+property of the resonance rather than a discrepancy. A reflector that appears
+in one frequency band and vanishes in another is banded fabric; nothing else in
+the reflectivity budget does that.
 
 Two presentation choices are deliberate. The transmitted wavelet is a
 narrowband (12 percent) Gabor rather than the broadband impulse the other
