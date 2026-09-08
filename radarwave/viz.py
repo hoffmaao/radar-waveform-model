@@ -286,8 +286,12 @@ def wavefield_movie(
         ``[(t_seconds, label), ...]``, ``db`` (default True: show
         ``20 log10`` of the analytic envelope, i.e. returned power, referenced
         to the transmit pulse -- this is how a processed sounding is displayed
-        and it keeps a 60 dB range readable), ``norm_after`` (linear mode only),
-        ``xlim``, ``title`` and ``note``.
+        and it keeps a 60 dB range readable), ``ref`` (dB mode only: an explicit
+        reference level in place of the largest peak in the panel),
+        ``norm_after`` (linear mode only), ``guides`` as ``[t_seconds, ...]``
+        drawn as faint horizontal reference times, ``tlim`` (extent of the time
+        axis in seconds, default the whole trace), ``xlabel`` (override for the
+        trace axis label), ``xlim``, ``title`` and ``note``.
     crf : int
         x264 constant rate factor; lower is better quality and a bigger file.
     also_gif : bool

@@ -463,8 +463,9 @@ def main(quick=False, render_only=False, bare=False, out=None):
         # their layering at all -- and this entry narrows it rather than
         # opening it.  The complete fix is to stamp the derived layer geometry
         # (rounded depths and sigma factors) instead of the call arguments,
-        # which invalidates the 2.3 GB cache here and costs a ~2.5 h re-run; do
-        # it whenever a rebuild is being paid for anyway.
+        # which invalidates the 2.3 GB cache here and costs a full re-run of
+        # this example (see CLAUDE.md's runtime table); do it whenever a
+        # rebuild is being paid for anyway.
         "layering": LAYERING,
         "fabric_above": ABOVE, "fabric_below": BELOW,
         "column": stampable(COLUMN),
